@@ -70,7 +70,7 @@ python main_bot.py
    - `DO_SSH_PRIVATE_KEY`
    - `DO_DROPLET_IP` 
    - `TELEGRAM_BOT_TOKEN`
-   - `GOOGLE_API_KEY`
+   - `GEMINI_API_KEY`
 
 2. Push в main ветку автоматически задеплоит на сервер
 
@@ -86,7 +86,7 @@ export DO_SSH_KEY_PATH="/path/to/your/ssh/key"
 ### Переменные окружения (.env)
 ```bash
 TELEGRAM_BOT_TOKEN=your_telegram_bot_token
-GOOGLE_API_KEY=your_google_gemini_api_key  
+GEMINI_API_KEY=your_google_gemini_api_key  
 ENVIRONMENT=production
 LOG_LEVEL=INFO
 ```
