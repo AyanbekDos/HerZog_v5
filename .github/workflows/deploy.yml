@@ -88,7 +88,7 @@ jobs:
           
           # Собираем и запускаем новый контейнер
           docker-compose build --no-cache
-          docker-compose up -d
+          docker-compose up -d --force-recreate
           
           # Очищаем старые образы
           docker image prune -f
