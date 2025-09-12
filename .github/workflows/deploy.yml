@@ -59,11 +59,16 @@ jobs:
     - name: Deploy to Digital Ocean
       run: |
         ssh -o StrictHostKeyChecking=no ${{ secrets.DO_SSH_USER }}@${{ secrets.DO_DROPLET_IP }} << 'EOF'
-          # Переходим в папку проекта или создаем её
-          cd /opt || mkdir -p /opt
+          # Переходим в домашнюю директорию
+          cd ~
           
-          # Останавливаем старый контейнер
-          docker-compose -f herzog/docker-compose.yml down || true
+          # (Опционально) Чистим старую папку в /opt, если она есть
+          sudo rm -rf /opt/herzog
+          
+          # Останавливаем старый контейнер, если он существует
+          if [ -f "herzog/docker-compose.yml" ]; then
+            docker-compose -f herzog/docker-compose.yml down || true
+          fi
           
           # Клонируем или обновляем репозиторий
           if [ -d "herzog" ]; then
