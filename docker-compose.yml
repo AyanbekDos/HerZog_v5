@@ -1,0 +1,31 @@
+version: '3.8'
+
+services:
+  herzog:
+    build: .
+    container_name: herzog_v3
+    restart: unless-stopped
+    environment:
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
+      - GOOGLE_API_KEY=${GOOGLE_API_KEY}
+      - ENVIRONMENT=production
+    volumes:
+      - ./projects:/app/projects
+      - ./logs:/app/logs
+    ports:
+      - "8000:8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import sys; sys.exit(0)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    networks:
+      - herzog_network
+
+networks:
+  herzog_network:
+    driver: bridge
+
+volumes:
+  herzog_projects:
+  herzog_logs:
