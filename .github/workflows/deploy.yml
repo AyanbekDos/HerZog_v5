@@ -58,7 +58,7 @@ jobs:
         
     - name: Deploy to Digital Ocean
       run: |
-        ssh -o StrictHostKeyChecking=no root@${{ secrets.DO_DROPLET_IP }} << 'EOF'
+        ssh -o StrictHostKeyChecking=no ${{ secrets.DO_SSH_USER }}@${{ secrets.DO_DROPLET_IP }} << 'EOF'
           # Переходим в папку проекта или создаем её
           cd /opt || mkdir -p /opt
           
