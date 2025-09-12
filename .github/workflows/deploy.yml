@@ -85,7 +85,7 @@ jobs:
           GEMINI_API_KEY=${{ secrets.GEMINI_API_KEY }}
           ENVIRONMENT=production
           LOG_LEVEL=INFO
-          EOL
+EOL
           
           # Собираем и запускаем новый контейнер
           docker-compose build --no-cache
