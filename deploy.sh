@@ -51,7 +51,7 @@ if [ -d ".git" ]; then
     git pull origin main
 else
     echo "📦 Клонируем репозиторий..."
-    git clone https://github.com/AyanbekDos/HerZog.git .
+    git clone https://github.com/AyanbekDos/HerZog_v5.git .
 fi
 
 # Создаем необходимые директории

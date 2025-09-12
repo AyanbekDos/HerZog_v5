@@ -68,7 +68,7 @@ jobs:
             cd herzog
             git pull origin main
           else
-            git clone https://github.com/AyanbekDos/HerZog.git herzog
+            git clone https://github.com/AyanbekDos/HerZog_v5.git herzog
             cd herzog
           fi
           

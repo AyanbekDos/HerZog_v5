@@ -40,8 +40,8 @@
 
 ### 1. Клонирование репозитория
 ```bash
-git clone https://github.com/AyanbekDos/HerZog.git
-cd HerZog
+git clone https://github.com/AyanbekDos/HerZog_v5.git
+cd HerZog_v5
 ```
 
 ### 2. Настройка окружения
