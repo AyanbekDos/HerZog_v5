@@ -80,12 +80,10 @@ jobs:
           fi
           
           # Создаем .env файл из секретов
-          cat > .env << EOL
-          TELEGRAM_BOT_TOKEN=${{ secrets.TELEGRAM_BOT_TOKEN }}
-          GEMINI_API_KEY=${{ secrets.GEMINI_API_KEY }}
-          ENVIRONMENT=production
-          LOG_LEVEL=INFO
-EOL
+          echo "TELEGRAM_BOT_TOKEN=${{ secrets.TELEGRAM_BOT_TOKEN }}" > .env
+          echo "GEMINI_API_KEY=${{ secrets.GEMINI_API_KEY }}" >> .env
+          echo "ENVIRONMENT=production" >> .env
+          echo "LOG_LEVEL=INFO" >> .env
           
           # Собираем и запускаем новый контейнер
           docker-compose build --no-cache
