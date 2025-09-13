@@ -253,9 +253,9 @@ class MultiPageScheduleGenerator:
         
         # Заголовки колонок (строка 5)
         headers = [
-            "№\\nп/п",
-            "Наименование\\nвида работ", 
-            "Ед.\\nизм.",
+            "№ п/п",
+            "Наименование вида работ", 
+            "Ед. изм.",
             "Кол-во",
             "Начало",
             "Окончание",
@@ -280,7 +280,7 @@ class MultiPageScheduleGenerator:
             start_date = datetime.fromisoformat(block['start_date']).strftime('%d.%m')
             end_date = datetime.fromisoformat(block['end_date']).strftime('%d.%m')
             
-            cell = ws.cell(row=6, column=i, value=f"Нед.{week_id}\\n{start_date}-{end_date}")
+            cell = ws.cell(row=6, column=i, value=f"Нед.{week_id} ({start_date}-{end_date})")
             cell.font = Font(size=8, bold=True)
             cell.fill = self.info_fill
             cell.alignment = self.center_align

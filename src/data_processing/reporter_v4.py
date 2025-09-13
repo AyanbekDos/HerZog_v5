@@ -322,9 +322,9 @@ class ProfessionalScheduleGenerator:
         
         # Заголовки колонок (строка 5)
         headers = [
-            "№\\nп/п",
-            "Наименование\\nпакета работ", 
-            "Ед.\\nизм.",
+            "№ п/п",
+            "Наименование пакета работ", 
+            "Ед. изм.",
             "Объем",
             "Начало",
             "Окончание",
@@ -350,7 +350,7 @@ class ProfessionalScheduleGenerator:
             start_date = datetime.fromisoformat(block['start_date']).strftime('%d.%m')
             end_date = datetime.fromisoformat(block['end_date']).strftime('%d.%m')
             
-            cell = ws.cell(row=6, column=i, value=f"📅 Нед.{week_id}\\n{start_date}-{end_date}")
+            cell = ws.cell(row=6, column=i, value=f"📅 Нед.{week_id} ({start_date}-{end_date})")
             cell.font = Font(size=8, bold=True, color=self.colors['primary_dark'])
             cell.fill = self.fill_light
             cell.alignment = self.align_center
@@ -425,7 +425,7 @@ class ProfessionalScheduleGenerator:
             total_staff = sum(staffing_per_block.values()) if staffing_per_block else 0
             max_staff = max(staffing_per_block.values()) if staffing_per_block else 0
             
-            staff_cell = ws.cell(row=current_row, column=7, value=f"👷 макс.{max_staff}\\n(всего {total_staff})")
+            staff_cell = ws.cell(row=current_row, column=7, value=f"👷 макс.{max_staff} (всего {total_staff})")
             staff_cell.alignment = self.align_center
             staff_cell.font = self.text_small
             staff_cell.border = self.border_thin
@@ -445,7 +445,7 @@ class ProfessionalScheduleGenerator:
                     staffing = staffing_per_block.get(week_str, 0)
                     
                     # Создаем информативный текст с обоснованием
-                    cell_value = f"🔧 {progress}%\\n👷 {staffing}чел"
+                    cell_value = f"🔧 {progress}% / 👷 {staffing}чел"
                     
                     # Добавляем краткое обоснование из reasoning
                     if package_reasoning and package_reasoning.get('scheduling_reasoning'):
@@ -456,7 +456,7 @@ class ProfessionalScheduleGenerator:
                             why_sequence = reasoning.get('why_this_sequence', '')
                             if why_sequence and len(why_sequence) > 20:
                                 hint = why_sequence[:20] + "..."
-                                cell_value += f"\\n💭 {hint}"
+                                cell_value += f" 💭 {hint}"
                     
                     cell.value = cell_value
                     cell.alignment = self.align_center

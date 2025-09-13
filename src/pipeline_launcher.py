@@ -8,7 +8,7 @@ from typing import Dict
 
 logger = logging.getLogger(__name__)
 
-async def launch_pipeline(project_path: str) -> Dict:
+async def launch_pipeline(project_path: str, progress_callback=None) -> Dict:
     """
     Запуск главного пайплайна HerZog v3.0
     
@@ -24,8 +24,8 @@ async def launch_pipeline(project_path: str) -> Dict:
         # Импортируем пайплайн
         from .main_pipeline import run_pipeline
         
-        # Запускаем пайплайн
-        result = await run_pipeline(project_path)
+        # Запускаем пайплайн с колбеком
+        result = await run_pipeline(project_path, progress_callback)
         
         logger.info(f"📊 Пайплайн завершен: success={result.get('success')}")
         

@@ -305,10 +305,47 @@ async def process_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         parse_mode='Markdown'
     )
     
-    # Запуск главного пайплайна
+    # Создаем колбек для уведомлений о прогрессе
+    progress_message = None
+    
+    async def progress_callback(progress_data):
+        nonlocal progress_message
+        step = progress_data['step']
+        status = progress_data['status'] 
+        message = progress_data['message']
+        
+        # Эмодзи для визуализации прогресса
+        step_icons = {
+            0: '🚀', 1: '📊', 2: '🏷️', 3: '📋', 
+            4: '📦', 5: '🔄', 6: '🧮', 7: '📅', 8: '📄', 9: '🎉'
+        }
+        
+        if status == 'started':
+            if progress_message:
+                # Обновляем существующее сообщение
+                progress_text = f"{step_icons.get(step, '⚙️')} {message}"
+                await progress_message.edit_text(progress_text, parse_mode='Markdown')
+            else:
+                # Создаем новое сообщение для прогресса
+                progress_text = f"{step_icons.get(step, '⚙️')} {message}"
+                progress_message = await context.bot.send_message(
+                    chat_id=update.effective_chat.id,
+                    text=progress_text,
+                    parse_mode='Markdown'
+                )
+        elif status == 'completed':
+            if progress_message:
+                progress_text = f"{step_icons.get(step, '✅')} {message}"
+                await progress_message.edit_text(progress_text, parse_mode='Markdown')
+        elif status == 'error':
+            if progress_message:
+                progress_text = f"❌ {message}"
+                await progress_message.edit_text(progress_text, parse_mode='Markdown')
+    
+    # Запуск главного пайплайна с колбеком
     try:
         from ..pipeline_launcher import launch_pipeline
-        result = await launch_pipeline(project_path)
+        result = await launch_pipeline(project_path, progress_callback)
         
         if result['success']:
             # Собираем информацию о созданных отчетах

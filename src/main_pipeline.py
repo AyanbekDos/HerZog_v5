@@ -20,6 +20,7 @@ class HerzogPipeline:
     
     def __init__(self, project_path: str):
         self.project_path = project_path
+        self.progress_callback = None
         self.steps = {
             1: "extraction",
             2: "classification", 
@@ -30,6 +31,21 @@ class HerzogPipeline:
             7: "staffing",
             8: "reporting"
         }
+    
+    async def _notify_progress(self, step: int, status: str, message: str, data: dict = None):
+        """Уведомление о прогрессе выполнения"""
+        if self.progress_callback:
+            try:
+                await self.progress_callback({
+                    'step': step,
+                    'step_name': self.steps.get(step, 'unknown'),
+                    'status': status,  # 'started', 'completed', 'error'
+                    'message': message,
+                    'data': data or {},
+                    'project_path': self.project_path
+                })
+            except Exception as e:
+                logger.warning(f"⚠️ Ошибка отправки уведомления: {e}")
         
     async def run_full_pipeline(self) -> Dict:
         """Запуск полного пайплайна через true.json архитектуру"""
@@ -44,6 +60,9 @@ class HerzogPipeline:
         }
         
         try:
+            # Уведомление о начале
+            await self._notify_progress(0, 'started', '🚀 Запуск обработки проекта...')
+            
             # Шаг 1-3: Подготовка данных (как раньше)
             await self._prepare_project_data()
             
@@ -67,6 +86,18 @@ class HerzogPipeline:
                 
                 logger.info(f"🤖 Запуск агента: {current_agent}")
                 
+                # Уведомление о начале агента
+                agent_steps = {
+                    'work_packager': (4, 'работ создает пакеты работ'),
+                    'works_to_packages': (5, 'распределяет работы по пакетам'),
+                    'counter': (6, 'рассчитывает объемы'),
+                    'scheduler_and_staffer': (7, 'создает календарный план'),
+                    'reporter': (8, 'генерирует Excel отчет')
+                }
+                
+                step_num, step_desc = agent_steps.get(current_agent, (0, f'выполняет {current_agent}'))
+                await self._notify_progress(step_num, 'started', f'🔄 {step_desc.title()}...')
+                
                 # Обновляем статус на in_progress
                 update_pipeline_status(truth_path, current_agent, "in_progress")
                 
@@ -86,7 +117,14 @@ class HerzogPipeline:
                     update_pipeline_status(truth_path, current_agent, "completed")
                     results['agents_completed'].append(current_agent)
                     logger.info(f"✅ Агент {current_agent} завершен успешно")
+                    
+                    # Уведомление о завершении агента
+                    step_num, step_desc = agent_steps.get(current_agent, (0, f'выполняет {current_agent}'))
+                    await self._notify_progress(step_num, 'completed', f'✅ {step_desc.title()} завершен!')
                 else:
+                    # Уведомление об ошибке
+                    step_num, step_desc = agent_steps.get(current_agent, (0, f'выполняет {current_agent}'))
+                    await self._notify_progress(step_num, 'error', f'❌ Ошибка в {step_desc}')
                     raise Exception(f"Агент {current_agent} завершился с ошибкой")
             
             # Шаг 8: Генерация финального отчета
@@ -100,6 +138,9 @@ class HerzogPipeline:
             results['completed_at'] = datetime.now().isoformat()
             logger.info("🎯 Пайплайн успешно завершен!")
             
+            # Финальное уведомление
+            await self._notify_progress(9, 'completed', '🎉 Проект готов! Календарный план создан.')
+            
         except Exception as e:
             results['error'] = str(e)
             results['failed_at'] = datetime.now().isoformat()
@@ -111,22 +152,31 @@ class HerzogPipeline:
         """Выполняет шаги 1-3: подготовка данных для true.json"""
         
         # Шаг 1: Извлечение данных из Excel
+        await self._notify_progress(1, 'started', '📊 Извлекаю данные из Excel файлов...')
         logger.info("Шаг 1: Извлечение данных...")
         step1_result = await self.run_extraction()
         if not step1_result['success']:
+            await self._notify_progress(1, 'error', '❌ Ошибка извлечения данных')
             raise Exception(f"Ошибка на шаге 1: {step1_result['error']}")
+        await self._notify_progress(1, 'completed', '✅ Данные извлечены')
         
         # Шаг 2: Классификация работ/материалов
+        await self._notify_progress(2, 'started', '🏷️ Классифицирую работы и материалы...')
         logger.info("Шаг 2: Классификация...")
         step2_result = await self.run_classification()
         if not step2_result['success']:
+            await self._notify_progress(2, 'error', '❌ Ошибка классификации')
             raise Exception(f"Ошибка на шаге 2: {step2_result['error']}")
+        await self._notify_progress(2, 'completed', '✅ Классификация завершена')
         
         # Шаг 3: Подготовка единого файла проекта
+        await self._notify_progress(3, 'started', '📋 Подготавливаю данные проекта...')
         logger.info("Шаг 3: Подготовка проекта...")
         step3_result = await self.run_preparation()
         if not step3_result['success']:
+            await self._notify_progress(3, 'error', '❌ Ошибка подготовки данных')
             raise Exception(f"Ошибка на шаге 3: {step3_result['error']}")
+        await self._notify_progress(3, 'completed', '✅ Данные подготовлены')
     
     async def run_extraction(self) -> Dict:
         """Шаг 1: Извлечение данных из Excel файлов"""
@@ -271,7 +321,8 @@ class HerzogPipeline:
             return {'success': False, 'error': str(e)}
 
 # Публичная функция для запуска пайплайна
-async def run_pipeline(project_path: str) -> Dict:
+async def run_pipeline(project_path: str, progress_callback=None) -> Dict:
     """Запуск полного пайплайна обработки проекта"""
     pipeline = HerzogPipeline(project_path)
+    pipeline.progress_callback = progress_callback
     return await pipeline.run_full_pipeline()
