@@ -684,8 +684,14 @@ async def run_scheduler_and_staffer(project_path: str) -> Dict[str, Any]:
     return await agent.process(project_path)
 
 if __name__ == "__main__":
-    # Тестирование агента
-    test_project_path = "/home/imort/Herzog_v3/projects/34975055/d19120ef"
+    import sys
+    
+    # Проверяем аргументы командной строки
+    if len(sys.argv) > 1:
+        test_project_path = sys.argv[1]
+    else:
+        # Тестирование по умолчанию
+        test_project_path = "/home/imort/Herzog_v3/projects/34975055/d490876a"
     
     if os.path.exists(test_project_path):
         print("🧪 Тестирование scheduler_and_staffer")
