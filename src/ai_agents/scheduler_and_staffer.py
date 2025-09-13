@@ -373,7 +373,16 @@ class SchedulerAndStaffer:
         # Валидация schedule_blocks
         schedule_blocks = package.get('schedule_blocks', [])
         max_week = len(timeline_blocks)
-        schedule_blocks = [week for week in schedule_blocks if 1 <= week <= max_week]
+        # Безопасное преобразование и валидация schedule_blocks
+        valid_blocks = []
+        for week in schedule_blocks:
+            try:
+                week_num = int(week) if isinstance(week, str) else week
+                if 1 <= week_num <= max_week:
+                    valid_blocks.append(week_num)
+            except (ValueError, TypeError):
+                continue
+        schedule_blocks = valid_blocks
         
         if not schedule_blocks:
             schedule_blocks = [1]  # fallback
