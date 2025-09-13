@@ -280,12 +280,15 @@ class MultiPageScheduleGenerator:
             start_date = datetime.fromisoformat(block['start_date']).strftime('%d.%m')
             end_date = datetime.fromisoformat(block['end_date']).strftime('%d.%m')
             
-            cell = ws.cell(row=6, column=i, value=f"Нед.{week_id} ({start_date}-{end_date})")
+            cell = ws.cell(row=6, column=i, value=f"Нед.{week_id}\n{start_date}-{end_date}")
             cell.font = Font(size=8, bold=True)
             cell.fill = self.info_fill
             cell.alignment = self.center_align
             cell.border = self.border
-        
+
+        # Устанавливаем высоту строки для заголовков недель
+        ws.row_dimensions[6].height = 30
+
         # Заполняем пакеты работ
         current_row = 7
         for i, package in enumerate(work_packages, 1):
