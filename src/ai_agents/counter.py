@@ -281,9 +281,15 @@ class WorkVolumeCalculator:
         Обрабатывает ответ от LLM с расчетами
         """
         try:
-            if isinstance(llm_response, str):
+            # Обрабатываем ответ от gemini_client
+            if isinstance(llm_response, dict) and 'response' in llm_response:
+                # Ответ от нового gemini_client
+                response_data = llm_response['response']
+            elif isinstance(llm_response, str):
+                # Сырая JSON строка
                 response_data = json.loads(llm_response)
             else:
+                # Уже распарсенный объект
                 response_data = llm_response
             
             calculation = response_data.get('calculation', {})
@@ -417,8 +423,13 @@ async def run_counter(project_path: str) -> Dict[str, Any]:
     return await agent.process(project_path)
 
 if __name__ == "__main__":
-    # Тестирование агента
-    test_project_path = "/home/imort/Herzog_v3/projects/34975055/d19120ef"
+    import sys
+    
+    # Проверяем аргументы командной строки
+    if len(sys.argv) > 1:
+        test_project_path = sys.argv[1]
+    else:
+        test_project_path = "/home/imort/Herzog_v3/projects/34975055/d490876a"
     
     if os.path.exists(test_project_path):
         print("🧪 Тестирование counter")

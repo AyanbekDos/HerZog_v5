@@ -276,7 +276,7 @@ class GeminiClient:
     
     def _try_fix_broken_json(self, text: str):
         """
-        Прямой парсинг JSON без восстановления
+        Парсинг JSON с очисткой управляющих символов
         
         Args:
             text: JSON текст
@@ -284,7 +284,17 @@ class GeminiClient:
         Returns:
             Распарсенный объект JSON
         """
-        return json.loads(text)
+        import re
+        
+        # Удаляем управляющие символы, которые ломают JSON
+        # Разрешенные управляющие символы: \n, \r, \t, \", \\
+        cleaned_text = re.sub(r'[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]', '', text)
+        
+        # Заменяем неэкранированные переносы строк внутри строк на \\n
+        # Это нужно для многострочных текстов внутри JSON
+        cleaned_text = re.sub(r'(?<!\\)\n(?=[^,}\]]*["}])', '\\\\n', cleaned_text)
+        
+        return json.loads(cleaned_text)
 
 # Глобальный экземпляр клиента
 gemini_client = GeminiClient()
