@@ -164,7 +164,7 @@ def classify_items(master_list: List[Dict], progress_callback=None, project_dir:
     
     if not api_token:
         logging.error("Не найден API ключ SMETNOEDELO_API_KEY")
-        return []
+        logging.info("Работаю только с локальной классификацией без API обогащения")
     
     # Кэш для API запросов
     api_cache = {}
@@ -180,8 +180,8 @@ def classify_items(master_list: List[Dict], progress_callback=None, project_dir:
         if classification:
             classified_item['classification'] = classification
             
-            # Шаг 3.3: Обогащение данными из API для работ
-            if classification == "Работа":
+            # Шаг 3.3: Обогащение данными из API для работ (только если есть API ключ)
+            if classification == "Работа" and api_token:
                 code = item.get('code', '')
                 
                 # Проверяем кэш
