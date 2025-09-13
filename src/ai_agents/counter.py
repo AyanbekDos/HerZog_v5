@@ -274,24 +274,52 @@ class WorkVolumeCalculator:
             works=json.dumps(input_data['works'], ensure_ascii=False, indent=2),
             user_directive=input_data['user_directive']
         )
+
+    def _clean_and_parse_json(self, response_text: str) -> Dict:
+        """
+        Очищает ответ от markdown и парсит JSON
+        """
+        try:
+            # Убираем markdown блок ```json ... ```
+            import re
+
+            # Ищем JSON блок в markdown
+            json_pattern = r'```(?:json)?\s*\n?(.*?)\n?```'
+            match = re.search(json_pattern, response_text, re.DOTALL | re.IGNORECASE)
+
+            if match:
+                json_content = match.group(1).strip()
+            else:
+                # Если нет markdown блока, используем всю строку
+                json_content = response_text.strip()
+
+            # Парсим JSON
+            return json.loads(json_content)
+
+        except json.JSONDecodeError as e:
+            logger.error(f"❌ Не удалось распарсить JSON: {e}")
+            logger.error(f"Исходный текст: {response_text[:200]}...")
+            raise
+        except Exception as e:
+            logger.error(f"❌ Ошибка обработки ответа: {e}")
+            raise
     
-    def _process_calculation_response(self, llm_response: Any, package: Dict, 
+    def _process_calculation_response(self, llm_response: Any, package: Dict,
                                     works: List[Dict]) -> Dict:
         """
         Обрабатывает ответ от LLM с расчетами
         """
         try:
-            # Обрабатываем ответ от gemini_client
-            if isinstance(llm_response, dict) and 'response' in llm_response:
-                # Ответ от нового gemini_client
-                response_data = llm_response['response']
-            elif isinstance(llm_response, str):
-                # Сырая JSON строка
-                response_data = json.loads(llm_response)
-            else:
+            # Обрабатываем ответ с учетом того, что может прийти строка с markdown
+            if isinstance(llm_response, str):
+                # Сырая строка, возможно с markdown блоком ```json
+                response_data = self._clean_and_parse_json(llm_response)
+            elif isinstance(llm_response, dict):
                 # Уже распарсенный объект
                 response_data = llm_response
-            
+            else:
+                raise ValueError(f"Неожиданный тип ответа: {type(llm_response)}")
+
             calculation = response_data.get('calculation', {})
             
             # Валидация и извлечение результата
