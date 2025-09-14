@@ -7,6 +7,7 @@ import json
 import os
 import asyncio
 import logging
+import uuid
 from typing import Dict, List, Any, Optional, Tuple
 from datetime import datetime
 from collections import defaultdict
@@ -25,6 +26,7 @@ class WorkVolumeCalculator:
     
     def __init__(self):
         self.agent_name = "counter"
+
     
     async def process(self, project_path: str) -> Dict[str, Any]:
         """
@@ -57,7 +59,8 @@ class WorkVolumeCalculator:
             # Извлекаем входные данные
             work_packages = truth_data.get('results', {}).get('work_packages', [])
             source_work_items = truth_data.get('source_work_items', [])
-            user_directive = truth_data.get('project_inputs', {}).get('agent_directives', {}).get('accountant', '')
+            agent_directives = truth_data.get('project_inputs', {}).get('agent_directives', {})
+            user_directive = agent_directives.get('counter') or agent_directives.get('accountant', '')
             
             if not work_packages:
                 raise Exception("Не найдены пакеты работ. Сначала должен быть запущен work_packager")
@@ -166,25 +169,27 @@ class WorkVolumeCalculator:
         }
         
         # Формируем запрос для LLM
-        formatted_prompt = self._format_prompt(input_data, prompt_template)
-        
-        # ИСПРАВЛЕНО: Сохраняем входные данные С ПРОМПТОМ для отладки
-        debug_input_data = {
-            'input_data': input_data,
-            'prompt_template': prompt_template,
-            'formatted_prompt': formatted_prompt,
-            'generated_at': datetime.now().isoformat(),
-            'agent': self.agent_name,
-            'package_id': package_id
+        system_instruction, user_prompt = self._format_prompt(input_data, prompt_template)
+
+        # Добавляем соль к системной инструкции для предотвращения RECITATION
+        salted_system_instruction = self._add_salt_to_prompt(system_instruction)
+
+        # Сохраняем структурированный промпт для отладки (как в work_packager)
+        debug_data = {
+            "system_instruction": salted_system_instruction,
+            "user_prompt": user_prompt
         }
-        
         input_path = os.path.join(agent_folder, f"{package_id}_input.json")
         with open(input_path, 'w', encoding='utf-8') as f:
-            json.dump(debug_input_data, f, ensure_ascii=False, indent=2)
-        
+            json.dump(debug_data, f, ensure_ascii=False, indent=2)
+
         # Вызываем Gemini API с указанием агента для оптимальной модели
         logger.info(f"📡 Отправка запроса для пакета {package_id} в Gemini (counter -> gemini-2.5-flash-lite)")
-        gemini_response = await gemini_client.generate_response(formatted_prompt, agent_name="counter")
+        gemini_response = await gemini_client.generate_response(
+            prompt=user_prompt,
+            system_instruction=salted_system_instruction,
+            agent_name="counter"
+        )
         
         # Сохраняем ответ от LLM
         response_path = os.path.join(agent_folder, f"{package_id}_response.json")
@@ -265,15 +270,32 @@ class WorkVolumeCalculator:
 - Если работы разнородные, выбери наиболее значимую единицу измерения
 """
     
-    def _format_prompt(self, input_data: Dict, prompt_template: str) -> str:
+    def _add_salt_to_prompt(self, prompt: str) -> str:
+        """Добавляет уникальную соль для предотвращения RECITATION."""
+        unique_id = str(uuid.uuid4())[:8]
+        prefix = f"# ID: {unique_id} | Режим: JSON_STRICT\n"
+        suffix = f"\n# Контроль: {unique_id}"
+        return prefix + prompt + suffix
+
+    def _format_prompt(self, input_data: Dict, prompt_template: str) -> Tuple[str, str]:
         """
-        Форматирует промпт с подстановкой данных
+        Форматирует промпт с разделением на system_instruction и user_prompt
+
+        Returns:
+            Tuple[str, str]: (system_instruction, user_prompt)
         """
-        return prompt_template.format(
-            package=json.dumps(input_data['package'], ensure_ascii=False, indent=2),
-            works=json.dumps(input_data['works'], ensure_ascii=False, indent=2),
-            user_directive=input_data['user_directive']
-        )
+        # System instruction - статический промпт без плейсхолдеров
+        system_instruction = prompt_template
+
+        # User prompt - JSON с данными
+        user_prompt_data = {
+            'package': input_data['package'],
+            'works': input_data['works'],
+            'user_directive': input_data['user_directive']
+        }
+        user_prompt = json.dumps(user_prompt_data, ensure_ascii=False, indent=2)
+
+        return system_instruction, user_prompt
 
     def _clean_and_parse_json(self, response_text: str) -> Dict:
         """
@@ -338,16 +360,25 @@ class WorkVolumeCalculator:
                 logger.warning(f"Не удалось преобразовать quantity к числу: {raw_quantity}, используем 0")
                 final_quantity = 0.0
                 
+            # Поддерживаем старый и новый формат ответа
             calculation_logic = calculation.get('calculation_logic', 'Автоматический расчет')
+            applied_rule = calculation.get('applied_rule', 'НЕОПРЕДЕЛЕНО')
+            calculation_steps = calculation.get('calculation_steps', [])
             component_analysis = calculation.get('component_analysis', [])
             reasoning = calculation.get('reasoning', {})
-            
+
+            # Если есть новый формат - используем его
+            if applied_rule != 'НЕОПРЕДЕЛЕНО' and calculation_steps:
+                calculation_logic = f"{applied_rule}: {', '.join(calculation_steps[:2])}"  # Первые 2 шага как логика
+
             # Создаем результат
             result = package.copy()
             result['calculations'] = {
                 'unit': final_unit,
                 'quantity': final_quantity,
                 'calculation_logic': calculation_logic,
+                'applied_rule': applied_rule,
+                'calculation_steps': calculation_steps,
                 'component_analysis': component_analysis,
                 'reasoning': reasoning,
                 'source_works_count': len(works),

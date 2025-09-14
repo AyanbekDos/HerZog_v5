@@ -88,7 +88,7 @@ class HerzogPipeline:
                 
                 # Уведомление о начале агента
                 agent_steps = {
-                    'work_packager': (4, 'работ создает пакеты работ'),
+                    'work_packager': (4, 'создает укрупненные пакеты работ'),
                     'works_to_packages': (5, 'распределяет работы по пакетам'),
                     'counter': (6, 'рассчитывает объемы'),
                     'scheduler_and_staffer': (7, 'создает календарный план'),
@@ -212,7 +212,7 @@ class HerzogPipeline:
             output_path = f"{self.project_path}/2_classified"
             
             # Классифицируем все позиции
-            classified_data = classify_estimates(input_file)
+            classified_data = await classify_estimates(input_file)
             
             # Сохраняем классифицированные данные
             with open(f"{output_path}/classified_estimates.json", 'w', encoding='utf-8') as f:

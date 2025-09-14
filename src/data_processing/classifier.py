@@ -149,7 +149,7 @@ def get_smetnoedelo_data_ORIGINAL(code: str, api_token: str) -> Optional[Dict]:
         return None
 
 
-def classify_items(master_list: List[Dict], progress_callback=None, project_dir: str = None) -> List[Dict]:
+async def classify_items(master_list: List[Dict], progress_callback=None, project_dir: str = None) -> List[Dict]:
     """
     Главная функция модуля CLASSIFIER
     
@@ -228,7 +228,7 @@ def classify_items(master_list: List[Dict], progress_callback=None, project_dir:
                 item_mapping[i] = item
             
             # Получаем результаты от Gemini
-            gemini_results = classify_with_gemini(gemini_input, project_dir)
+            gemini_results = await classify_with_gemini(gemini_input, project_dir)
             
             # Обновляем классификацию для найденных позиций
             for item_uuid, gemini_result in gemini_results.items():
@@ -266,7 +266,7 @@ def classify_items(master_list: List[Dict], progress_callback=None, project_dir:
     return classified_list
 
 
-def classify_estimates(input_file: str) -> List[Dict]:
+async def classify_estimates(input_file: str) -> List[Dict]:
     """
     Главная функция для пайплайна - классификация извлеченных данных
     
@@ -295,7 +295,7 @@ def classify_estimates(input_file: str) -> List[Dict]:
                 project_dir = "/".join(parts[:project_idx + 3])
     
     # Классифицируем данные
-    classified_data = classify_items(raw_data, project_dir=project_dir)
+    classified_data = await classify_items(raw_data, project_dir=project_dir)
     
     logging.info(f"Классификация завершена: {len(classified_data)} записей")
     

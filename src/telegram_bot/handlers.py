@@ -610,7 +610,7 @@ async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE
                 "Примеры: `15`, `10-20`, `от 10 до 20`"
             )
     
-    elif current_step in ['conceptualizer', 'strategist', 'accountant', 'foreman']:
+    elif current_step in ['work_packager', 'counter', 'scheduler_and_staffer']:
         # Сохраняем директиву для соответствующего агента
         context.user_data[current_step] = text
         next_step = questionnaire.next_step(context)

@@ -9,6 +9,7 @@ import os
 import asyncio
 import logging
 import math
+import uuid
 from typing import Dict, List, Any, Optional, Tuple
 from datetime import datetime
 
@@ -27,6 +28,7 @@ class WorksToPackagesAssigner:
     def __init__(self, batch_size: int = 50):
         self.agent_name = "works_to_packages"
         self.batch_size = batch_size
+
     
     async def process(self, project_path: str) -> Dict[str, Any]:
         """
@@ -117,7 +119,7 @@ class WorksToPackagesAssigner:
                 'agent': self.agent_name
             }
     
-    async def _process_batch(self, batch_works: List[Dict], work_packages: List[Dict], 
+    async def _process_batch(self, batch_works: List[Dict], work_packages: List[Dict],
                            prompt_template: str, batch_num: int, agent_folder: str) -> List[Dict]:
         """
         Обрабатывает один батч работ
@@ -137,25 +139,27 @@ class WorksToPackagesAssigner:
         }
         
         # Формируем запрос для LLM
-        formatted_prompt = self._format_prompt(input_data, prompt_template)
-        
-        # ИСПРАВЛЕНО: Сохраняем входные данные С ПРОМПТОМ для отладки
-        debug_input_data = {
-            'input_data': input_data,
-            'prompt_template': prompt_template,
-            'formatted_prompt': formatted_prompt,
-            'generated_at': datetime.now().isoformat(),
-            'agent': self.agent_name,
-            'batch_number': batch_num + 1
+        system_instruction, user_prompt = self._format_prompt(input_data, prompt_template)
+
+        # Добавляем соль к системной инструкции для предотвращения RECITATION
+        salted_system_instruction = self._add_salt_to_prompt(system_instruction)
+
+        # Сохраняем структурированный промпт для отладки (как в work_packager)
+        debug_data = {
+            "system_instruction": salted_system_instruction,
+            "user_prompt": user_prompt
         }
-        
         batch_input_path = os.path.join(agent_folder, f"batch_{batch_num+1:03d}_input.json")
         with open(batch_input_path, 'w', encoding='utf-8') as f:
-            json.dump(debug_input_data, f, ensure_ascii=False, indent=2)
-        
-        # Вызываем Gemini API с указанием агента для оптимальной модели
+            json.dump(debug_data, f, ensure_ascii=False, indent=2)
+
+        # Вызываем Gemini API с system_instruction и user_prompt
         logger.info(f"📡 Отправка батча {batch_num + 1} в Gemini (works_to_packages -> gemini-2.5-flash-lite)")
-        gemini_response = await gemini_client.generate_response(formatted_prompt, agent_name="works_to_packages")
+        gemini_response = await gemini_client.generate_response(
+            prompt=user_prompt,
+            system_instruction=salted_system_instruction,
+            agent_name="works_to_packages"
+        )
         
         # Сохраняем ответ от LLM
         batch_response_path = os.path.join(agent_folder, f"batch_{batch_num+1:03d}_response.json")
@@ -192,46 +196,57 @@ class WorksToPackagesAssigner:
         Базовый промпт, если файл не найден
         """
         return """
-Ты - эксперт по строительству. Твоя задача - присвоить каждую детализированную работу одному из укрупненных пакетов работ.
+# РОЛЬ
+Ты — автоматизированный диспетчер.
 
-ДОСТУПНЫЕ ПАКЕТЫ РАБОТ:
-{work_packages}
+# ЗАДАЧА
+Для КАЖДОЙ работы из списка `РАБОТЫ ДЛЯ РАСПРЕДЕЛЕНИЯ` назначь ОДИН наиболее подходящий `package_id` из `ДОСТУПНЫХ ПАКЕТОВ`.
 
-РАБОТЫ ДЛЯ РАСПРЕДЕЛЕНИЯ (БАТЧ {batch_number}):
-{batch_works}
+# ВХОДНЫЕ ДАННЫЕ
+В запросе пользователя ты получишь JSON-объект со следующими ключами:
+- "work_packages": доступные пакеты работ
+- "batch_works": работы для распределения в текущем батче
+- "batch_number": номер текущего батча
 
-ЗАДАЧА:
-Для каждой работы выбери наиболее подходящий package_id из доступных пакетов. 
-Анализируй название работы и ее код, чтобы понять, к какому типу работ она относится.
+# КРИТИЧЕСКИЕ ПРАВИЛА
+1. **ПОЛНОТА ОТВЕТА:** Твой ответ в ключе "assignments" ДОЛЖЕН содержать ровно столько объектов, сколько было во входных "batch_works". Это самое главное правило.
+2. **ВАЛИДНОСТЬ ID:** Используй только `work_id` и `package_id` из предоставленных данных. Не придумывай новые.
+3. **ЛОГИКА:** Выбирай пакет, максимально соответствующий названию работы.
 
-ПРИНЦИПЫ РАСПРЕДЕЛЕНИЯ:
-1. Демонтажные работы → в пакет с демонтажем
-2. Монтажные работы → в соответствующий монтажный пакет
-3. Отделочные работы → в отделочные пакеты
-4. Материалы обычно не включаются в пакеты (но если есть, то к соответствующим работам)
-
-ФОРМАТ ОТВЕТА (строго JSON):
-{{
+# ФОРМАТ ВЫВОДА (СТРОГО JSON)
+{
     "assignments": [
-        {{
-            "work_id": "id_работы",
-            "package_id": "pkg_001"
-        }}
+        { "work_id": "id_работы_1", "package_id": "pkg_003" }
     ]
-}}
-
-ВАЖНО: Количество assignments должно точно соответствовать количеству входящих работ!
+}
 """
     
-    def _format_prompt(self, input_data: Dict, prompt_template: str) -> str:
+    def _add_salt_to_prompt(self, prompt: str) -> str:
+        """Добавляет уникальную соль для предотвращения RECITATION."""
+        unique_id = str(uuid.uuid4())[:8]
+        prefix = f"# ID: {unique_id} | Режим: JSON_STRICT\n"
+        suffix = f"\n# Контроль: {unique_id}"
+        return prefix + prompt + suffix
+
+    def _format_prompt(self, input_data: Dict, prompt_template: str) -> Tuple[str, str]:
         """
-        Форматирует промпт с подстановкой данных
+        Форматирует промпт с разделением на system_instruction и user_prompt
+
+        Returns:
+            Tuple[str, str]: (system_instruction, user_prompt)
         """
-        return prompt_template.format(
-            work_packages=json.dumps(input_data['work_packages'], ensure_ascii=False, indent=2),
-            batch_works=json.dumps(input_data['batch_works'], ensure_ascii=False, indent=2),
-            batch_number=input_data['batch_number']
-        )
+        # System instruction - статический промпт без плейсхолдеров
+        system_instruction = prompt_template
+
+        # User prompt - только JSON с работами
+        user_prompt_data = {
+            'work_packages': input_data['work_packages'],
+            'batch_works': input_data['batch_works'],
+            'batch_number': input_data['batch_number']
+        }
+        user_prompt = json.dumps(user_prompt_data, ensure_ascii=False, indent=2)
+
+        return system_instruction, user_prompt
     
     def _process_batch_response(self, llm_response: Any, original_works: List[Dict]) -> List[Dict]:
         """
@@ -257,7 +272,7 @@ class WorksToPackagesAssigner:
                 if work_id in assignment_dict:
                     work_copy['package_id'] = assignment_dict[work_id]
                 else:
-                    # Если назначение не найдено, ошибка - не должно быть fallback
+                    # НИКАКОГО FALLBACK! Ошибка должна быть ошибкой!
                     logger.error(f"❌ КРИТИЧЕСКАЯ ОШИБКА: Не найдено назначение для работы {work_id}")
                     raise Exception(f"Gemini не назначил пакет для работы {work_id}. Проверьте промпт и ответ LLM.")
                 

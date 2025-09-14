@@ -59,11 +59,10 @@ def create_true_json(project_path: str) -> bool:
                     "min": directives_data.get("workforce_range", {}).get("min", 10),
                     "max": directives_data.get("workforce_range", {}).get("max", 20)
                 },
-                "agent_directives": directives_data.get("directives", {
-                    "conceptualizer": "",
-                    "strategist": "",
-                    "accountant": "",
-                    "foreman": ""
+                "agent_directives": directives_data.get("agent_directives", {
+                    "work_packager": "",
+                    "counter": "",
+                    "scheduler_and_staffer": ""
                 })
             },
             

@@ -7,6 +7,7 @@ import json
 import os
 import asyncio
 import logging
+import uuid
 from typing import Dict, List, Any, Optional
 from datetime import datetime
 
@@ -24,6 +25,13 @@ class WorkPackager:
     
     def __init__(self):
         self.agent_name = "work_packager"
+
+    def _add_salt_to_prompt(self, prompt: str) -> str:
+        """Добавляет уникальную соль для предотвращения RECITATION."""
+        unique_id = str(uuid.uuid4())[:8]
+        prefix = f"# ID: {unique_id} | Режим: JSON_STRICT\n"
+        suffix = f"\n# Контроль: {unique_id}"
+        return prefix + prompt + suffix
     
     async def process(self, project_path: str) -> Dict[str, Any]:
         """
@@ -59,25 +67,28 @@ class WorkPackager:
             # Загружаем промпт
             prompt_template = self._load_prompt()
             
-            # Формируем запрос для LLM
-            formatted_prompt = self._format_prompt(input_data, prompt_template)
-            
-            # ИСПРАВЛЕНО: Сохраняем входные данные С ПРОМПТОМ для отладки
-            debug_input_data = {
-                'input_data': input_data,
-                'prompt_template': prompt_template,
-                'formatted_prompt': formatted_prompt,
-                'generated_at': datetime.now().isoformat(),
-                'agent': self.agent_name
+            # Формируем системную инструкцию и пользовательские данные
+            system_instruction, user_prompt = self._format_prompt(input_data, prompt_template)
+
+            # Добавляем соль к системной инструкции для предотвращения RECITATION
+            salted_system_instruction = self._add_salt_to_prompt(system_instruction)
+
+            # Сохраняем структурированный промпт для отладки
+            debug_data = {
+                "system_instruction": salted_system_instruction,
+                "user_prompt": user_prompt
             }
-            
             with open(os.path.join(llm_input_path, "llm_input.json"), 'w', encoding='utf-8') as f:
-                json.dump(debug_input_data, f, ensure_ascii=False, indent=2)
-            
-            # Вызываем Gemini API с указанием агента для оптимальной модели
-            logger.info("📡 Отправка запроса в Gemini (work_packager -> gemini-2.5-pro)")
-            gemini_response = await gemini_client.generate_response(formatted_prompt, agent_name="work_packager")
-            
+                json.dump(debug_data, f, ensure_ascii=False, indent=2)
+
+            # Вызываем Gemini API с разделенными промптами
+            logger.info("📡 Отправка запроса в Gemini с системной инструкцией (work_packager -> gemini-2.5-pro)")
+            gemini_response = await gemini_client.generate_response(
+                prompt=user_prompt,
+                agent_name="work_packager",
+                system_instruction=salted_system_instruction
+            )
+
             # Сохраняем ответ от LLM
             with open(os.path.join(llm_input_path, "llm_response.json"), 'w', encoding='utf-8') as f:
                 json.dump(gemini_response, f, ensure_ascii=False, indent=2)
@@ -135,15 +146,16 @@ class WorkPackager:
                 'code': item.get('code', '')
             })
         
-        # Получаем директиву пользователя
+        # Получаем директиву пользователя (совместимость со старым форматом)
         project_inputs = truth_data.get('project_inputs', {})
         target_count = project_inputs.get('target_work_package_count', 15)
-        conceptualizer_directive = project_inputs.get('agent_directives', {}).get('conceptualizer', '')
+        agent_directives = project_inputs.get('agent_directives', {})
+        work_packager_directive = agent_directives.get('work_packager') or agent_directives.get('conceptualizer', '')
         
         return {
             'source_work_items': work_items_for_llm,
             'target_work_package_count': target_count,
-            'user_directive': conceptualizer_directive,
+            'user_directive': work_packager_directive,
             'total_work_items': len(work_items_for_llm)
         }
     
@@ -200,17 +212,25 @@ class WorkPackager:
 }}
 """
     
-    def _format_prompt(self, input_data: Dict, prompt_template: str) -> str:
+    def _format_prompt(self, input_data: Dict, prompt_template: str) -> tuple[str, str]:
         """
-        Форматирует промпт с подстановкой данных
+        Форматирует промпт, разделяя системную инструкцию и пользовательские данные
+
+        Returns:
+            tuple[str, str]: (system_instruction, user_prompt)
         """
-        return prompt_template.format(
-            source_work_items=json.dumps(input_data['source_work_items'], 
-                                       ensure_ascii=False, indent=2),
+        # Системная инструкция содержит статические данные (шаблон + директивы)
+        system_instruction = prompt_template.format(
             target_work_package_count=input_data['target_work_package_count'],
             user_directive=input_data['user_directive'],
             total_work_items=input_data['total_work_items']
         )
+
+        # Пользовательский промпт содержит только динамические данные (JSON)
+        user_prompt = json.dumps(input_data['source_work_items'],
+                                ensure_ascii=False, indent=2)
+
+        return system_instruction, user_prompt
     
     def _process_llm_response(self, llm_response: Any) -> List[Dict]:
         """

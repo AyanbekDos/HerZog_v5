@@ -7,8 +7,8 @@ import logging
 import os
 import uuid
 from typing import List, Dict, Optional
-import requests
 from dotenv import load_dotenv
+from ..shared.gemini_client import gemini_client
 
 load_dotenv()
 
@@ -22,7 +22,7 @@ def load_prompt_template() -> str:
         logging.error(f"Ошибка загрузки промпта: {e}")
         return ""
 
-def classify_with_gemini(items: List[Dict], project_dir: str = None) -> Dict[str, Dict]:
+async def classify_with_gemini(items: List[Dict], project_dir: str = None) -> Dict[str, Dict]:
     """
     Классификация неопределенных позиций через Gemini 2.5 Pro
     
@@ -34,11 +34,6 @@ def classify_with_gemini(items: List[Dict], project_dir: str = None) -> Dict[str
         Словарь {id: {"classification": str, "reasoning": str}}
     """
     if not items:
-        return {}
-        
-    api_key = os.getenv('GEMINI_API_KEY')
-    if not api_key:
-        logging.error("Не найден API ключ GEMINI_API_KEY")
         return {}
     
     # Используем реальные ID из данных и готовим минимальные данные
@@ -60,115 +55,84 @@ def classify_with_gemini(items: List[Dict], project_dir: str = None) -> Dict[str
         logging.error("Не удалось загрузить шаблон промпта")
         return {}
     
-    items_json = json.dumps(items_with_id, ensure_ascii=False, indent=2)
-    prompt = prompt_template.replace('{ITEMS_JSON}', items_json)
-    
-    # Сохраняем llm_input.json если указана папка проекта
-    if project_dir:
-        llm_input_path = os.path.join(project_dir, "2_classified", "llm_input.json")
-        
-        # Подготавливаем данные для сохранения
-        llm_input_data = {
-            "prompt": prompt,
-            "items": []
-        }
-        
-        # Добавляем реальные ID к каждой позиции
-        for item in items:
-            # Найдем соответствующий ID для этой позиции
-            matching_id_item = None
-            for id_item in items_with_id:
-                if id_item["full_name"] == f"{item.get('code', '')} {item.get('name', '')}":
-                    matching_id_item = id_item
-                    break
-            
-            if matching_id_item:
-                llm_input_data["items"].append({
-                    "id": matching_id_item["id"],
-                    "code": item.get('code', ''),
-                    "name": item.get('name', '')
-                })
-        
-        with open(llm_input_path, 'w', encoding='utf-8') as f:
-            json.dump(llm_input_data, f, ensure_ascii=False, indent=2)
-        logging.info(f"Сохранен llm_input.json: {llm_input_path}")
-    
+    # Разделяем системную инструкцию и пользовательские данные
+    system_instruction = prompt_template.replace('{ITEMS_JSON}', "")  # Убираем плейсхолдер
+    system_instruction = system_instruction.replace("Анализируй следующие позиции:", "Проанализируй строительные позиции в формате JSON, которые будут предоставлены пользователем:")
+    user_prompt = json.dumps(items_with_id, ensure_ascii=False, indent=2)
+
     try:
-        # Запрос к Gemini API
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-pro:generateContent?key={api_key}"
-        
-        headers = {
-            'Content-Type': 'application/json'
-        }
-        
-        payload = {
-            "contents": [
-                {
-                    "parts": [
-                        {
-                            "text": prompt
-                        }
-                    ]
-                }
-            ],
-            "generationConfig": {
-                "temperature": 0.1,
-                "maxOutputTokens": 8192
+        # Используем асинхронный gemini_client с системной инструкцией
+        logging.info("📡 Отправка запроса на классификацию в Gemini с системной инструкцией (classifier -> gemini-2.5-flash-lite)")
+        gemini_response = await gemini_client.generate_response(
+            prompt=user_prompt,
+            agent_name="classifier",
+            system_instruction=system_instruction
+        )
+
+        # Сохраняем llm_input и llm_response если указана папка проекта
+        if project_dir:
+            classified_dir = os.path.join(project_dir, "2_classified")
+            os.makedirs(classified_dir, exist_ok=True)
+
+            # Сохраняем структурированные данные для отладки
+            llm_input_path = os.path.join(classified_dir, "llm_input.json")
+            llm_input_data = {
+                "system_instruction": system_instruction,
+                "user_prompt": user_prompt,
+                "items": []
             }
-        }
-        
-        response = requests.post(url, json=payload, headers=headers, timeout=30)
-        
-        if response.status_code == 200:
-            data = response.json()
-            
-            # Сохраняем llm_response.json если указана папка проекта
-            if project_dir:
-                llm_response_path = os.path.join(project_dir, "2_classified", "llm_response.json")
-                with open(llm_response_path, 'w', encoding='utf-8') as f:
-                    json.dump(data, f, ensure_ascii=False, indent=2)
-                logging.info(f"Сохранен llm_response.json: {llm_response_path}")
-            
-            # Извлекаем текст ответа
-            try:
-                response_text = data['candidates'][0]['content']['parts'][0]['text']
-                logging.info(f"Получен ответ от Gemini: {response_text[:200]}...")
-                
-                # Парсим JSON ответ
-                # Ищем JSON массив в тексте
-                start_idx = response_text.find('[')
-                end_idx = response_text.rfind(']')
-                
-                if start_idx >= 0 and end_idx > start_idx:
-                    json_text = response_text[start_idx:end_idx+1]
-                    classifications = json.loads(json_text)
-                    
-                    # Преобразуем в словарь по ID
-                    result = {}
-                    for classification in classifications:
-                        item_id = classification.get('id') or classification.get('uuid')  # Поддерживаем оба варианта для обратной совместимости
-                        if item_id in id_mapping:
-                            result[item_id] = {
-                                'classification': classification.get('classification', 'Неопределенное'),
-                                'reasoning': classification.get('reasoning', ''),
-                                'original_item': id_mapping[item_id]
-                            }
-                    
-                    logging.info(f"Gemini успешно классифицировал {len(result)} позиций")
-                    return result
-                
-                else:
-                    logging.error("Не найден валидный JSON в ответе Gemini")
-                    return {}
-                    
-            except (KeyError, IndexError, json.JSONDecodeError) as e:
-                logging.error(f"Ошибка парсинга ответа Gemini: {e}")
-                return {}
-        
-        else:
-            logging.error(f"Ошибка API Gemini: {response.status_code} - {response.text}")
+
+            # Добавляем реальные ID к каждой позиции
+            for item in items:
+                # Используем item_id напрямую - он уже есть в id_mapping
+                item_id = item.get('id')
+                if item_id and item_id in id_mapping:
+                    llm_input_data["items"].append({
+                        "id": item_id,
+                        "code": item.get('code', ''),
+                        "name": item.get('name', '')
+                    })
+
+            with open(llm_input_path, 'w', encoding='utf-8') as f:
+                json.dump(llm_input_data, f, ensure_ascii=False, indent=2)
+
+            # Сохраняем ответ от Gemini
+            llm_response_path = os.path.join(classified_dir, "llm_response.json")
+            with open(llm_response_path, 'w', encoding='utf-8') as f:
+                json.dump(gemini_response, f, ensure_ascii=False, indent=2)
+
+            logging.info(f"Сохранены llm_input.json и llm_response.json в {classified_dir}")
+
+        # Проверяем успешность ответа
+        if not gemini_response.get('success', False):
+            logging.error(f"Ошибка Gemini API: {gemini_response.get('error', 'Неизвестная ошибка')}")
             return {}
-            
+
+        # Извлекаем текст ответа
+        response_text = gemini_response.get('raw_text', '')
+        logging.info(f"Получен ответ от Gemini: {response_text[:200]}...")
+
+        # Парсим JSON ответ из gemini_response['response'] (уже распарсен)
+        classifications = gemini_response.get('response', [])
+
+        if isinstance(classifications, list):
+            # Преобразуем в словарь по ID
+            result = {}
+            for classification in classifications:
+                item_id = classification.get('id') or classification.get('uuid')  # Поддерживаем оба варианта для обратной совместимости
+                if item_id in id_mapping:
+                    result[item_id] = {
+                        'classification': classification.get('classification', 'Неопределенное'),
+                        'reasoning': classification.get('reasoning', ''),
+                        'original_item': id_mapping[item_id]
+                    }
+
+            logging.info(f"Gemini успешно классифицировал {len(result)} позиций")
+            return result
+        else:
+            logging.error("Gemini вернул ответ не в виде списка")
+            return {}
+
     except Exception as e:
         logging.error(f"Ошибка при запросе к Gemini API: {str(e)}")
         return {}
