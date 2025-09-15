@@ -211,7 +211,7 @@ async def classify_items(master_list: List[Dict], progress_callback=None, projec
     undefined_items = [item for item in classified_list if item['classification'] in ['Неопределенное', 'Иное']]
     
     if undefined_items:
-        logging.info(f"Отправляю {len(undefined_items)} позиций в Gemini для анализа ('Иное' + 'Неопределенные')")
+        logging.info(f"Отправляю {len(undefined_items)} позиций в Claude для анализа ('Иное' + 'Неопределенные')")
         
         try:
             from .gemini_classifier import classify_with_gemini, convert_gemini_result
@@ -231,24 +231,32 @@ async def classify_items(master_list: List[Dict], progress_callback=None, projec
             gemini_results = await classify_with_gemini(gemini_input, project_dir)
             
             # Обновляем классификацию для найденных позиций
+            updated_count = 0
             for item_uuid, gemini_result in gemini_results.items():
                 # Находим соответствующий элемент в classified_list
                 original_item = gemini_result['original_item']
-                
+
                 for classified_item in classified_list:
                     if classified_item.get('id') == original_item.get('id'):
-                        
-                        # Конвертируем результат Gemini
+
+                        # Конвертируем результат Claude
                         converted_result = convert_gemini_result(gemini_result)
-                        
-                        # Обновляем позицию (заменяем "Иное" или "Неопределенное" на результат Gemini)
+
+                        # Обновляем позицию (заменяем "Иное" или "Неопределенное" на результат Claude)
+                        old_classification = classified_item.get('classification', 'Неопределенное')
                         classified_item.update(converted_result)
+                        new_classification = classified_item.get('classification', 'Неопределенное')
+
+                        logging.debug(f"Обновлено: {old_classification} → {new_classification} для {item_uuid}")
+                        updated_count += 1
                         break
+
+            logging.info(f"Claude успешно обновил классификацию для {updated_count} из {len(gemini_results)} позиций")
             
-            logging.info(f"Gemini обработал {len(gemini_results)} позиций (включая 'Иное' и 'Неопределенные')")
+            logging.info(f"Claude обработал {len(gemini_results)} позиций (включая 'Иное' и 'Неопределенные')")
             
         except Exception as e:
-            logging.error(f"Ошибка при обработке неопределенных позиций через Gemini: {e}")
+            logging.error(f"Ошибка при обработке неопределенных позиций через Claude: {e}")
     
     # Статистика классификации (после обработки Gemini)
     classifications = [item['classification'] for item in classified_list]

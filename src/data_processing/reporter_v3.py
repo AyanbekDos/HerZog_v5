@@ -141,52 +141,26 @@ class MultiPageScheduleGenerator:
     
     def _load_scheduling_reasoning(self, input_file: str) -> Dict[str, Any]:
         """
-        Загружает данные scheduling_reasoning из папки scheduler_and_staffer
+        Загружает данные scheduling_reasoning из true.json (уже обработанные scheduler_and_staffer агентом)
         """
         try:
-            # Определяем путь к папке scheduler_and_staffer
+            # Читаем true.json напрямую
             project_folder = os.path.dirname(input_file)
-            scheduler_response_path = os.path.join(project_folder, "7_scheduler_and_staffer", "llm_response.json")
-            
-            if not os.path.exists(scheduler_response_path):
-                logger.warning(f"Файл scheduling_reasoning не найден: {scheduler_response_path}")
+            truth_path = os.path.join(project_folder, "true.json")
+
+            if not os.path.exists(truth_path):
+                logger.warning(f"Файл true.json не найден: {truth_path}")
                 return {}
-            
-            with open(scheduler_response_path, 'r', encoding='utf-8') as f:
-                scheduler_data = json.load(f)
-            
-            if not scheduler_data.get('success', False):
-                logger.warning("Scheduler response не содержит успешного результата")
-                return {}
-            
-            # Парсим JSON из response
-            raw_response = scheduler_data.get('raw_text', scheduler_data.get('response', ''))
-            if isinstance(raw_response, str):
-                try:
-                    # Очищаем от markdown если есть
-                    if raw_response.strip().startswith('```'):
-                        # Убираем ```json в начале и ``` в конце
-                        lines = raw_response.strip().split('\n')
-                        if lines[0].startswith('```'):
-                            lines = lines[1:]
-                        if lines[-1].strip() == '```':
-                            lines = lines[:-1]
-                        raw_response = '\n'.join(lines)
-                    
-                    parsed_response = json.loads(raw_response)
-                except json.JSONDecodeError as e:
-                    logger.warning(f"Не удалось распарсить scheduler response JSON: {e}")
-                    logger.warning(f"Raw response sample: {raw_response[:200]}...")
-                    return {}
-            else:
-                parsed_response = raw_response
-            
-            # Извлекаем scheduled_packages с reasoning
-            scheduled_packages = parsed_response.get('scheduled_packages', [])
-            
+
+            with open(truth_path, 'r', encoding='utf-8') as f:
+                truth_data = json.load(f)
+
+            # Собираем scheduling_reasoning из work_packages в true.json
+            work_packages = truth_data.get('results', {}).get('work_packages', [])
+
             # Создаем словарь для быстрого поиска
             reasoning_dict = {}
-            for package in scheduled_packages:
+            for package in work_packages:
                 package_id = package.get('package_id')
                 if package_id and 'scheduling_reasoning' in package:
                     reasoning_dict[package_id] = {

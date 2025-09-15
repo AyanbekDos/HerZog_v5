@@ -60,7 +60,24 @@ class ProjectQuestionnaire:
     
     def save_directives(self, context: ContextTypes.DEFAULT_TYPE, project_path: str):
         """Сохранить собранные директивы в файл"""
+
+        # Получаем информацию о загруженных файлах
+        files = context.user_data.get('files', [])
+
+        # Определяем имя проекта из первого файла (без расширения)
+        project_name = "Безымянный проект"
+        source_file_name = "estimate.xlsx"
+
+        if files:
+            first_file = files[0]
+            file_name = first_file.get('file_name', 'estimate.xlsx')
+            source_file_name = file_name
+            # Убираем расширение для имени проекта
+            project_name = file_name.replace('.xlsx', '').replace('.xls', '').replace('_', ' ')
+
         directives = {
+            'project_name': project_name,
+            'source_file_name': source_file_name,
             'target_work_count': context.user_data.get('work_count', 15),
             'project_timeline': context.user_data.get('timeline', {}),
             'workforce_range': context.user_data.get('workforce', {}),

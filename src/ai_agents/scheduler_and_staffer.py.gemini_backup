@@ -14,7 +14,7 @@ from datetime import datetime
 from collections import defaultdict
 
 # Импорты из нашей системы
-from ..shared.claude_client import claude_client as gemini_client  # Migrated to Claude
+from ..shared.gemini_client import gemini_client
 from ..shared.truth_initializer import update_pipeline_status
 
 logger = logging.getLogger(__name__)
@@ -89,15 +89,27 @@ class SchedulerAndStaffer:
             # Подготавливаем компактные данные о пакетах для планирования
             compact_packages = self._prepare_compact_packages(packages_with_calcs, project_path)
 
-            # Обрабатываем ВСЕ пакеты сразу - никаких батчей!
-            logger.info(f"📦 Обработка ВСЕХ {len(compact_packages)} пакетов за один раз")
+            # Разбиваем пакеты на батчи и обрабатываем
+            scheduled_packages = []
+            total_batches = math.ceil(len(compact_packages) / self.batch_size)
 
-            scheduled_packages = await self._process_all_packages_at_once(
-                compact_packages, timeline_blocks, workforce_range,
-                scheduler_and_staffer_directive, prompt_template, agent_folder
-            )
+            for batch_num in range(total_batches):
+                start_idx = batch_num * self.batch_size
+                end_idx = min((batch_num + 1) * self.batch_size, len(compact_packages))
+                batch_packages = compact_packages[start_idx:end_idx]
 
-            logger.info(f"✅ Обработано {len(scheduled_packages)} пакетов за один запрос")
+                logger.info(f"📦 Обработка батча {batch_num + 1}/{total_batches} ({len(batch_packages)} пакетов)")
+
+                # Обрабатываем батч
+                batch_result = await self._process_batch(
+                    batch_packages, timeline_blocks, workforce_range,
+                    scheduler_and_staffer_directive, prompt_template,
+                    batch_num, agent_folder
+                )
+
+                scheduled_packages.extend(batch_result)
+
+            logger.info(f"✅ Обработано {len(scheduled_packages)} пакетов в {total_batches} батчах")
             
             # Валидируем ограничения по персоналу
             validation_result = self._validate_workforce_constraints(
@@ -258,19 +270,10 @@ class SchedulerAndStaffer:
         # Добавляем соль к системной инструкции для предотвращения RECITATION
         salted_system_instruction = self._add_salt_to_prompt(system_instruction)
 
-        # Сохраняем РЕАЛЬНЫЕ входные данные для отладки
+        # Сохраняем структурированный промпт для отладки (как в work_packager)
         debug_data = {
-            "batch_packages": batch_packages,    # РЕАЛЬНЫЕ данные пакетов батча
-            "timeline_blocks": timeline_blocks,  # РЕАЛЬНЫЕ данные недель
-            "workforce_range": workforce_range,
-            "user_directive": user_directive,
             "system_instruction": salted_system_instruction,
-            "user_prompt": user_prompt,
-            "meta": {
-                "batch_number": batch_num + 1,
-                "packages_count": len(batch_packages),
-                "timeline_blocks_count": len(timeline_blocks)
-            }
+            "user_prompt": user_prompt
         }
         batch_input_path = os.path.join(agent_folder, f"batch_{batch_num+1:03d}_input.json")
         with open(batch_input_path, 'w', encoding='utf-8') as f:
@@ -289,7 +292,6 @@ class SchedulerAndStaffer:
         with open(batch_response_path, 'w', encoding='utf-8') as f:
             json.dump(gemini_response, f, ensure_ascii=False, indent=2)
 
-
         if not gemini_response.get('success', False):
             logger.error(f"❌ КРИТИЧЕСКАЯ ОШИБКА Gemini API для батча {batch_num + 1}: {gemini_response.get('error')}")
             raise Exception(f"Gemini API не смог обработать батч {batch_num + 1}. Проверьте промпт и соединение.")
@@ -300,66 +302,6 @@ class SchedulerAndStaffer:
         )
 
         return scheduled_batch
-
-    async def _process_all_packages_at_once(self, compact_packages: List[Dict], timeline_blocks: List[Dict],
-                                          workforce_range: Dict, scheduler_directive: str, prompt_template: str,
-                                          agent_folder: str) -> List[Dict]:
-        """
-        Обрабатывает ВСЕ пакеты за один запрос - без батчей!
-        """
-        from ..shared.claude_client import claude_client
-
-        # Формируем единый промт с ВСЕМИ пакетами
-        user_prompt = json.dumps({
-            "work_packages": compact_packages,
-            "timeline_blocks": timeline_blocks,
-            "workforce_range": workforce_range,
-            "user_directive": scheduler_directive
-        }, ensure_ascii=False, indent=2)
-
-        # Солим системную инструкцию
-        salted_system_instruction = f"{prompt_template}\n\n# SALT: {uuid.uuid4()}"
-
-        # Сохраняем РЕАЛЬНЫЕ входные данные для отладки
-        input_data = {
-            "work_packages": compact_packages,  # РЕАЛЬНЫЕ данные пакетов
-            "timeline_blocks": timeline_blocks, # РЕАЛЬНЫЕ данные недель
-            "workforce_range": workforce_range,
-            "user_directive": scheduler_directive,
-            "meta": {
-                "packages_count": len(compact_packages),
-                "timeline_blocks_count": len(timeline_blocks),
-                "timestamp": datetime.now().isoformat()
-            }
-        }
-
-        input_path = os.path.join(agent_folder, "all_packages_input.json")
-        with open(input_path, 'w', encoding='utf-8') as f:
-            json.dump(input_data, f, ensure_ascii=False, indent=2)
-
-        # Вызываем Claude API с ВСЕМИ пакетами
-        logger.info(f"📡 Отправка ВСЕХ пакетов в Claude (scheduler_and_staffer)")
-        claude_response = await claude_client.generate_response(
-            prompt=user_prompt,
-            system_instruction=salted_system_instruction,
-            agent_name="scheduler_and_staffer"
-        )
-
-        # Сохраняем ответ от Claude
-        response_path = os.path.join(agent_folder, "all_packages_response.json")
-        with open(response_path, 'w', encoding='utf-8') as f:
-            json.dump(claude_response, f, ensure_ascii=False, indent=2)
-
-        if not claude_response.get('success', False):
-            logger.error(f"❌ КРИТИЧЕСКАЯ ОШИБКА Claude API: {claude_response.get('error')}")
-            raise Exception(f"Claude API не смог обработать все пакеты. Проверьте промпт и соединение.")
-
-        # Обрабатываем ответ
-        scheduled_packages = self._process_scheduling_response(
-            claude_response['response'], compact_packages, timeline_blocks, workforce_range
-        )
-
-        return scheduled_packages
 
 
     def _process_scheduling_response(self, llm_response: Any, original_packages: List[Dict],
@@ -663,15 +605,7 @@ class SchedulerAndStaffer:
             # Сохраняем volume_data от Counter агента, если есть
             if 'volume_data' in existing_pkg:
                 merged_pkg['volume_data'] = existing_pkg['volume_data']
-
-            # СОХРАНЯЕМ ИМЯ ПАКЕТА от work_packager, если есть
-            if 'name' in existing_pkg:
-                merged_pkg['name'] = existing_pkg['name']
-
-            # СОХРАНЯЕМ ОПИСАНИЕ ПАКЕТА от work_packager, если есть
-            if 'description' in existing_pkg:
-                merged_pkg['description'] = existing_pkg['description']
-
+                
             merged_packages.append(merged_pkg)
         
         truth_data['results']['work_packages'] = merged_packages

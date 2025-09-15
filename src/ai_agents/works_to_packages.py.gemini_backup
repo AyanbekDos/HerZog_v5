@@ -14,7 +14,7 @@ from typing import Dict, List, Any, Optional, Tuple
 from datetime import datetime
 
 # Импорты из нашей системы
-from ..shared.claude_client import claude_client as gemini_client  # Migrated to Claude
+from ..shared.gemini_client import gemini_client
 from ..shared.truth_initializer import update_pipeline_status
 
 logger = logging.getLogger(__name__)
@@ -144,24 +144,17 @@ class WorksToPackagesAssigner:
         # Добавляем соль к системной инструкции для предотвращения RECITATION
         salted_system_instruction = self._add_salt_to_prompt(system_instruction)
 
-        # Сохраняем РЕАЛЬНЫЕ входные данные для отладки
+        # Сохраняем структурированный промпт для отладки (как в work_packager)
         debug_data = {
-            "batch_works": input_data['batch_works'],      # РЕАЛЬНЫЕ данные работ
-            "work_packages": input_data['work_packages'],  # РЕАЛЬНЫЕ данные пакетов
             "system_instruction": salted_system_instruction,
-            "user_prompt": user_prompt,
-            "meta": {
-                "batch_number": input_data['batch_number'],
-                "works_count": len(input_data['batch_works']),
-                "packages_count": len(input_data['work_packages'])
-            }
+            "user_prompt": user_prompt
         }
         batch_input_path = os.path.join(agent_folder, f"batch_{batch_num+1:03d}_input.json")
         with open(batch_input_path, 'w', encoding='utf-8') as f:
             json.dump(debug_data, f, ensure_ascii=False, indent=2)
 
         # Вызываем Gemini API с system_instruction и user_prompt
-        logger.info(f"📡 Отправка батча {batch_num + 1} в Claude (works_to_packages -> claude-3.5-sonnet)")
+        logger.info(f"📡 Отправка батча {batch_num + 1} в Gemini (works_to_packages -> gemini-2.5-flash-lite)")
         gemini_response = await gemini_client.generate_response(
             prompt=user_prompt,
             system_instruction=salted_system_instruction,
@@ -174,7 +167,7 @@ class WorksToPackagesAssigner:
             json.dump(gemini_response, f, ensure_ascii=False, indent=2)
         
         if not gemini_response.get('success', False):
-            logger.error(f"Ошибка Claude API для батча {batch_num + 1}: {gemini_response.get('error')}")
+            logger.error(f"Ошибка Gemini API для батча {batch_num + 1}: {gemini_response.get('error')}")
             # Возвращаем работы без назначения пакетов
             return batch_works
         
@@ -281,7 +274,7 @@ class WorksToPackagesAssigner:
                 else:
                     # НИКАКОГО FALLBACK! Ошибка должна быть ошибкой!
                     logger.error(f"❌ КРИТИЧЕСКАЯ ОШИБКА: Не найдено назначение для работы {work_id}")
-                    raise Exception(f"Claude не назначил пакет для работы {work_id}. Проверьте промпт и ответ LLM.")
+                    raise Exception(f"Gemini не назначил пакет для работы {work_id}. Проверьте промпт и ответ LLM.")
                 
                 updated_works.append(work_copy)
             
@@ -289,8 +282,8 @@ class WorksToPackagesAssigner:
             
         except (json.JSONDecodeError, KeyError, AttributeError) as e:
             logger.error(f"❌ КРИТИЧЕСКАЯ ОШИБКА парсинга ответа LLM для батча: {e}")
-            logger.error(f"Сырой ответ от Claude: {llm_response}")
-            raise Exception(f"Не удалось распарсить ответ от Claude для батча: {e}")
+            logger.error(f"Сырой ответ от Gemini: {llm_response}")
+            raise Exception(f"Не удалось распарсить ответ от Gemini для батча: {e}")
     
     def _update_truth_data(self, truth_data: Dict, assigned_works: List[Dict], truth_path: str):
         """

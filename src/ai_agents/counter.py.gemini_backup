@@ -13,7 +13,7 @@ from datetime import datetime
 from collections import defaultdict
 
 # Импорты из нашей системы
-from ..shared.claude_client import claude_client as gemini_client  # Migrated to Claude
+from ..shared.gemini_client import gemini_client
 from ..shared.truth_initializer import update_pipeline_status
 
 logger = logging.getLogger(__name__)
@@ -174,24 +174,17 @@ class WorkVolumeCalculator:
         # Добавляем соль к системной инструкции для предотвращения RECITATION
         salted_system_instruction = self._add_salt_to_prompt(system_instruction)
 
-        # Сохраняем РЕАЛЬНЫЕ входные данные для отладки
+        # Сохраняем структурированный промпт для отладки (как в work_packager)
         debug_data = {
-            "package": package,              # РЕАЛЬНЫЕ данные пакета
-            "works": package_data['works'],  # РЕАЛЬНЫЕ данные работ
-            "user_directive": user_directive,
             "system_instruction": salted_system_instruction,
-            "user_prompt": user_prompt,
-            "meta": {
-                "package_id": package_id,
-                "works_count": len(package_data['works'])
-            }
+            "user_prompt": user_prompt
         }
         input_path = os.path.join(agent_folder, f"{package_id}_input.json")
         with open(input_path, 'w', encoding='utf-8') as f:
             json.dump(debug_data, f, ensure_ascii=False, indent=2)
 
         # Вызываем Gemini API с указанием агента для оптимальной модели
-        logger.info(f"📡 Отправка запроса для пакета {package_id} в Claude (counter -> claude-3.5-sonnet)")
+        logger.info(f"📡 Отправка запроса для пакета {package_id} в Gemini (counter -> gemini-2.5-flash-lite)")
         gemini_response = await gemini_client.generate_response(
             prompt=user_prompt,
             system_instruction=salted_system_instruction,
@@ -204,8 +197,8 @@ class WorkVolumeCalculator:
             json.dump(gemini_response, f, ensure_ascii=False, indent=2)
         
         if not gemini_response.get('success', False):
-            logger.error(f"❌ КРИТИЧЕСКАЯ ОШИБКА Claude API для пакета {package_id}: {gemini_response.get('error')}")
-            raise Exception(f"Не удалось получить ответ от Claude для пакета {package_id}: {gemini_response.get('error')}")
+            logger.error(f"❌ КРИТИЧЕСКАЯ ОШИБКА Gemini API для пакета {package_id}: {gemini_response.get('error')}")
+            raise Exception(f"Не удалось получить ответ от Gemini для пакета {package_id}: {gemini_response.get('error')}")
         
         # Обрабатываем ответ
         calculation_result = self._process_calculation_response(
@@ -396,8 +389,8 @@ class WorkVolumeCalculator:
             
         except (json.JSONDecodeError, KeyError, AttributeError, ValueError) as e:
             logger.error(f"❌ КРИТИЧЕСКАЯ ОШИБКА парсинга ответа расчетов: {e}")
-            logger.error(f"Сырой ответ от Claude: {llm_response}")
-            raise Exception(f"Не удалось распарсить ответ расчетов от Claude: {e}")
+            logger.error(f"Сырой ответ от Gemini: {llm_response}")
+            raise Exception(f"Не удалось распарсить ответ расчетов от Gemini: {e}")
     
     def _update_truth_data(self, truth_data: Dict, calculated_packages: List[Dict], truth_path: str):
         """
