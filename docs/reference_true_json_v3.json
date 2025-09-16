@@ -1,0 +1,263 @@
+{
+  "_id": "ObjectId('...')",
+  "schema_version": "3.0",
+
+  "project": {
+    "id": "uuid-4",
+    "name": "Ремонт МБДОУ Аленушка",
+    "source_file": "02_01_01_Текущий_ремонт_МБДОУ_Аленушка_2_0.xlsx",
+    "created_at": "2024-09-16T10:39:41.828616Z",
+    "updated_at": "2024-09-16T10:41:14.112277Z",
+    "user_id": "34975055",
+    "status": "completed"
+  },
+
+  "configuration": {
+    "timeline": {
+      "start_date": "2024-01-01",
+      "end_date": "2024-02-01",
+      "total_weeks": 4,
+      "blocks": [
+        {
+          "week_id": 1,
+          "start_date": "2024-01-08",
+          "end_date": "2024-01-12",
+          "working_days": 4,
+          "calendar_days": 5,
+          "holidays": ["2024-01-08"],
+          "is_partial_start": false,
+          "is_partial_end": false
+        }
+      ]
+    },
+    "workforce": {
+      "min_workers": 3,
+      "max_workers": 6,
+      "target_average": 4.5
+    },
+    "targets": {
+      "package_count": 13
+    },
+    "directives": {
+      "work_packager": "Группируй по типам работ",
+      "counter": "Считай площади точно",
+      "scheduler": "Демонтаж в первую очередь"
+    }
+  },
+
+  "pipeline": {
+    "current_stage": "completed",
+    "agents": {
+      "extractor": {
+        "status": "completed",
+        "started_at": "2024-09-16T10:39:41.971770Z",
+        "completed_at": "2024-09-16T10:39:42.123456Z",
+        "result_summary": {
+          "extracted_items": 43,
+          "extraction_method": "xlsx_parser"
+        }
+      },
+      "classifier": {
+        "status": "completed",
+        "started_at": "2024-09-16T10:39:42.200000Z",
+        "completed_at": "2024-09-16T10:39:45.300000Z",
+        "result_summary": {
+          "total_items": 43,
+          "classified_works": 22,
+          "classified_materials": 13,
+          "classified_other": 1,
+          "unclassified": 7,
+          "ai_classifications": 8
+        }
+      },
+      "preparer": {
+        "status": "completed",
+        "started_at": "2024-09-16T10:39:45.400000Z",
+        "completed_at": "2024-09-16T10:39:46.500000Z",
+        "result_summary": {
+          "timeline_blocks_created": 4,
+          "work_items_prepared": 22
+        }
+      },
+      "work_packager": {
+        "status": "completed",
+        "started_at": "2024-09-16T10:39:46.600000Z",
+        "completed_at": "2024-09-16T10:39:58.630590Z",
+        "result_summary": {
+          "categories_created": 5,
+          "packages_created": 9,
+          "ai_model": "anthropic/claude-sonnet-4"
+        }
+      },
+      "works_to_packages": {
+        "status": "completed",
+        "started_at": "2024-09-16T10:39:59.209416Z",
+        "completed_at": "2024-09-16T10:40:28.317143Z",
+        "result_summary": {
+          "works_assigned": 22,
+          "batches_processed": 1,
+          "ai_model": "anthropic/claude-3.5-sonnet"
+        }
+      },
+      "counter": {
+        "status": "completed",
+        "started_at": "2024-09-16T10:40:28.924523Z",
+        "completed_at": "2024-09-16T10:41:02.784945Z",
+        "result_summary": {
+          "packages_calculated": 9,
+          "ai_calculations": 8,
+          "direct_copies": 1,
+          "ai_model": "anthropic/claude-3.5-sonnet"
+        }
+      },
+      "scheduler": {
+        "status": "completed",
+        "started_at": "2024-09-16T10:41:03.366668Z",
+        "completed_at": "2024-09-16T10:41:14.112277Z",
+        "result_summary": {
+          "packages_scheduled": 9,
+          "peak_workforce": 5,
+          "average_workforce": 2.25,
+          "ai_model": "anthropic/claude-3.5-sonnet"
+        }
+      }
+    }
+  },
+
+  "source_data": {
+    "work_items": [
+      {
+        "id": "4298d0fa-4a4c-4abc-8eb8-6adb9dd0b662",
+        "source_file": "02_01_01_Текущий_ремонт_МБДОУ_Аленушка_2_0.xlsx",
+        "code": "ГЭСНр55-01-005-01",
+        "name": "Разборка кирпичных перегородок на отдельные кирпичи",
+        "unit": "м3",
+        "quantity": 0.72,
+        "classification": "Работа",
+        "classification_reasoning": "Технологическая операция включаемая в график работ",
+        "assigned_package_id": "pkg_001",
+        "extracted_at": "2024-09-16T10:39:42.000000Z",
+        "classified_at": "2024-09-16T10:39:44.000000Z",
+        "assigned_at": "2024-09-16T10:40:15.000000Z"
+      }
+    ]
+  },
+
+  "project_hierarchy": [
+    {
+      "id": "cat_001",
+      "type": "category",
+      "name": "Демонтажные работы",
+      "parent_id": null,
+      "created_at": "2024-09-16T10:39:58.626276Z",
+      "created_by": "work_packager",
+      "child_packages": ["pkg_001", "pkg_002"]
+    },
+    {
+      "id": "pkg_001",
+      "type": "package",
+      "name": "Демонтаж перегородок и отделки (стены, потолки)",
+      "description": "Разборка кирпичных перегородок и удаление старой штукатурки со стен и потолков.",
+      "parent_category_id": "cat_001",
+      "created_at": "2024-09-16T10:39:58.626284Z",
+      "created_by": "work_packager",
+
+      "assigned_work_items": [
+        "4298d0fa-4a4c-4abc-8eb8-6adb9dd0b662",
+        "5c212ac0-1b7f-44d3-82b7-02861f38fd5d"
+      ],
+
+      "volume_calculation": {
+        "unit": "м²",
+        "quantity": 24.3,
+        "calculation_method": "ПРАВИЛО ОБЩЕЙ ПОВЕРХНОСТИ (МАКСИМУМ)",
+        "calculation_steps": [
+          "Анализ работ по демонтажу перегородок и отделки",
+          "Применение правила максимума для площадных работ",
+          "Результат: 24.3 м² максимальной площади обработки"
+        ],
+        "component_analysis": [
+          {
+            "work_name": "Отбивка штукатурки с поверхностей: стен и потолков кирпичных",
+            "unit": "100 м2",
+            "quantity": 0.243,
+            "converted_quantity": 24.3,
+            "is_dominant": true
+          }
+        ],
+        "calculated_at": "2024-09-16T10:40:45.000000Z",
+        "calculated_by": "counter"
+      },
+
+      "schedule": {
+        "assigned_weeks": [2, 3],
+        "progress_by_week": {
+          "2": {
+            "progress_percent": 40,
+            "workers_count": 4,
+            "work_description": "Начальный демонтаж перегородок"
+          },
+          "3": {
+            "progress_percent": 60,
+            "workers_count": 5,
+            "work_description": "Завершение демонтажа и отбивка штукатурки"
+          }
+        },
+        "total_duration_weeks": 2,
+        "reasoning": {
+          "directive_influence": "Директива не влияла",
+          "weeks_logic": "Выбраны недели 2-3 для логической последовательности работ",
+          "duration_logic": "Двухнедельная длительность оптимальна для качественного выполнения",
+          "sequence_logic": "Демонтаж в начале проекта перед основными работами",
+          "staffing_logic": "Увеличение персонала отражает нарастание объема работ"
+        },
+        "scheduled_at": "2024-09-16T10:41:10.000000Z",
+        "scheduled_by": "scheduler"
+      }
+    }
+  ],
+
+  "project_summary": {
+    "totals": {
+      "categories": 5,
+      "packages": 9,
+      "work_items": 22,
+      "materials": 13,
+      "other_items": 8
+    },
+    "timeline_summary": {
+      "total_duration_weeks": 4,
+      "active_weeks": 2,
+      "peak_workforce": 5,
+      "average_workforce": 2.25,
+      "workforce_utilization": {
+        "week_1": {"active_packages": 0, "total_workers": 0},
+        "week_2": {"active_packages": 1, "total_workers": 4},
+        "week_3": {"active_packages": 1, "total_workers": 5},
+        "week_4": {"active_packages": 0, "total_workers": 0}
+      }
+    },
+    "cost_summary": {
+      "currency": "RUB",
+      "total_estimated_cost": null,
+      "cost_by_category": {},
+      "cost_calculated": false,
+      "cost_calculation_agent": "not_implemented"
+    }
+  },
+
+  "audit_log": [
+    {
+      "timestamp": "2024-09-16T10:39:41.828616Z",
+      "agent": "system",
+      "action": "project_created",
+      "details": {"source_file": "02_01_01_Текущий_ремонт_МБДОУ_Аленушка_2_0.xlsx"}
+    },
+    {
+      "timestamp": "2024-09-16T10:41:14.112277Z",
+      "agent": "scheduler",
+      "action": "pipeline_completed",
+      "details": {"total_duration_seconds": 92.28}
+    }
+  ]
+}

@@ -249,9 +249,9 @@ async def classify_items(master_list: List[Dict], progress_callback=None, projec
                         updated_count += 1
                         break
 
-            logging.info(f"Claude успешно обновил классификацию для {updated_count} из {len(gemini_results)} позиций")
-            
-            logging.info(f"Claude обработал {len(gemini_results)} позиций (включая 'Иное' и 'Неопределенные')")
+            logging.info(f"Claude успешно обновил классификацию для {updated_count} из {len(undefined_items)} позиций")
+
+            logging.info(f"Claude обработал {len(undefined_items)} позиций (включая 'Иное' и 'Неопределенные'), получил результат для {len(gemini_results)} из них")
             
         except Exception as e:
             logging.error(f"Ошибка при обработке неопределенных позиций через Claude: {e}")

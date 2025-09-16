@@ -163,13 +163,19 @@ class MultiPageScheduleGenerator:
             with open(truth_path, 'r', encoding='utf-8') as f:
                 truth_data = json.load(f)
 
-            # Собираем scheduling_reasoning из work_packages в true.json
-            work_packages = truth_data.get('results', {}).get('work_packages', [])
+            # Собираем scheduling_reasoning из scheduled_packages или work_breakdown_structure в true.json
+            scheduled_packages = truth_data.get('results', {}).get('scheduled_packages', [])
+            work_breakdown_structure = truth_data.get('results', {}).get('work_breakdown_structure', [])
+            work_packages = truth_data.get('results', {}).get('work_packages', [])  # Fallback
+
+            # Пробуем сначала scheduled_packages, потом work_breakdown_structure, потом старую структуру
+            packages_to_check = scheduled_packages or [p for p in work_breakdown_structure if p.get('type') == 'package'] or work_packages
 
             # Создаем словарь для быстрого поиска
             reasoning_dict = {}
-            for package in work_packages:
-                package_id = package.get('package_id')
+            for package in packages_to_check:
+                # Поддерживаем разные варианты ID
+                package_id = package.get('package_id') or package.get('id')
                 if package_id and 'scheduling_reasoning' in package:
                     reasoning_dict[package_id] = {
                         'scheduling_reasoning': package['scheduling_reasoning'],
@@ -299,8 +305,8 @@ class MultiPageScheduleGenerator:
                     'scheduling_reasoning': schedule_by_id.get(package_id, {}).get('scheduling_reasoning', {}),
 
                     # Данные объемов - сначала из volume_calculations, потом из самого пакета
-                    'volume_data': volume_by_id.get(package_id, {}) or item.get('volume_data', {}),
-                    'calculations': volume_by_id.get(package_id, {}).get('calculation', {}) or item.get('volume_data', {})
+                    'volume_data': item.get('volume_data', {}),
+                    'calculations': volume_by_id.get(package_id, {}).get('calculations', {}) or item.get('volume_data', {})
                 }
 
                 packages.append(package_data)
@@ -424,10 +430,15 @@ class MultiPageScheduleGenerator:
                 volume_data = package.get('volume_data', {})
                 calculations = package.get('calculations', {})
 
-                unit = (volume_data.get('unit') or
-                       calculations.get('unit') or 'шт')
-                quantity = (volume_data.get('quantity') or
-                           calculations.get('quantity') or 0)
+                # Приоритет: calculations -> volume_data -> дефолт (новая структура первее)
+                unit = (calculations.get('unit') or
+                       calculations.get('final_unit') or
+                       volume_data.get('unit') or
+                       volume_data.get('final_unit') or 'шт')
+                quantity = (calculations.get('quantity') or
+                           calculations.get('final_quantity') or
+                           volume_data.get('quantity') or
+                           volume_data.get('final_quantity') or 0)
 
                 ws.cell(row=current_row, column=3, value=unit).alignment = self.center_align
                 ws.cell(row=current_row, column=4, value=str(quantity)).alignment = self.center_align
@@ -451,15 +462,18 @@ class MultiPageScheduleGenerator:
                     ws.cell(row=current_row, column=5, value=start_date).alignment = self.center_align
                     ws.cell(row=current_row, column=6, value=end_date).alignment = self.center_align
 
-                # Прогресс по неделям
+                # Прогресс по неделям с отображением количества людей
                 progress_per_block = package.get('progress_per_block', {})
+                staffing_per_block = package.get('staffing_per_block', {})
                 for i, block in enumerate(timeline_blocks, 7):
                     week_id = str(block.get('week_id', block.get('block_id', i-6)))
                     progress = progress_per_block.get(week_id, 0)
+                    staffing = staffing_per_block.get(week_id, 0)
 
                     cell = ws.cell(row=current_row, column=i)
                     if progress > 0:
-                        cell.value = f"{progress}%"
+                        # Формат: "50%/3чел"
+                        cell.value = f"{progress}%/{staffing}чел"
                         cell.alignment = self.center_align
                         # Градиентная заливка в зависимости от прогресса
                         if progress >= 40:
@@ -479,6 +493,44 @@ class MultiPageScheduleGenerator:
 
             # Пустая строка между категориями
             current_row += 1
+
+        # Добавляем итоговую строку "График движения рабочей силы чел/день" для иерархического листа
+        current_row += 1  # Пустая строка
+
+        # Заголовок итоговой строки
+        ws.cell(row=current_row, column=1, value="").alignment = self.center_align
+        ws.cell(row=current_row, column=2, value="График движения рабочей силы чел/день").font = Font(bold=True, color="2E4057")
+        ws.cell(row=current_row, column=3, value="чел").alignment = self.center_align
+        ws.cell(row=current_row, column=4, value="").alignment = self.center_align
+        ws.cell(row=current_row, column=5, value="").alignment = self.center_align
+        ws.cell(row=current_row, column=6, value="").alignment = self.center_align
+
+        # Подсчитываем итоги по неделям для иерархического листа
+        for j, block in enumerate(timeline_blocks, 7):
+            week_id = block.get('week_id', block.get('block_id'))
+            week_str = str(week_id)
+
+            # Суммируем всех работников на этой неделе из всех категорий и пакетов
+            total_workers = 0
+            for category in categories:
+                for package in category.get('child_packages', []):
+                    staffing_per_block = package.get('staffing_per_block', {})
+
+                    # Если на этой неделе есть работники в этом пакете
+                    if week_str in staffing_per_block:
+                        total_workers += staffing_per_block[week_str]
+
+            # Записываем итог
+            if total_workers > 0:
+                cell = ws.cell(row=current_row, column=j, value=total_workers)
+                cell.alignment = self.center_align
+                cell.font = Font(bold=True, color="FFFFFF")
+                cell.fill = PatternFill(start_color="2E4057", end_color="2E4057", fill_type="solid")
+                cell.border = self.border
+            else:
+                cell = ws.cell(row=current_row, column=j, value="")
+                cell.fill = PatternFill(start_color="2E4057", end_color="2E4057", fill_type="solid")
+                cell.border = self.border
 
         # Настройка ширины колонок
         column_widths = {
@@ -572,17 +624,17 @@ class MultiPageScheduleGenerator:
             # Единица измерения и количество - универсальная логика
             volume_data = package.get('volume_data', {})
             calculations = package.get('calculations', {})
-            
-            # Приоритет: volume_data -> calculations -> дефолт
-            unit = (volume_data.get('final_unit') or 
-                   volume_data.get('unit') or 
-                   calculations.get('final_unit') or 
-                   calculations.get('unit') or 'шт')
-                   
-            quantity = (volume_data.get('final_quantity') or 
-                       volume_data.get('quantity') or 
-                       calculations.get('final_quantity') or 
-                       calculations.get('quantity') or 0)
+
+            # Приоритет: calculations -> volume_data -> дефолт (новая структура первее)
+            unit = (calculations.get('unit') or
+                   calculations.get('final_unit') or
+                   volume_data.get('unit') or
+                   volume_data.get('final_unit') or 'шт')
+
+            quantity = (calculations.get('quantity') or
+                       calculations.get('final_quantity') or
+                       volume_data.get('quantity') or
+                       volume_data.get('final_quantity') or 0)
             
             ws.cell(row=current_row, column=3, value=unit).alignment = self.center_align
             ws.cell(row=current_row, column=4, value=str(quantity)).alignment = self.center_align
@@ -632,7 +684,51 @@ class MultiPageScheduleGenerator:
                     cell.border = self.border
             
             current_row += 1
-        
+
+        # Добавляем итоговую строку "График движения рабочей силы чел/день"
+
+        # Заголовок итоговой строки (без пустой строки)
+        ws.cell(row=current_row, column=1, value="").alignment = self.center_align
+        ws.cell(row=current_row, column=2, value="График движения рабочей силы чел/день").font = Font(bold=True, color="FFFFFF")
+        ws.cell(row=current_row, column=3, value="чел").alignment = self.center_align
+        ws.cell(row=current_row, column=4, value="").alignment = self.center_align
+        ws.cell(row=current_row, column=5, value="").alignment = self.center_align
+        ws.cell(row=current_row, column=6, value="").alignment = self.center_align
+
+        # Добавляем фоновую заливку для всей строки
+        for col in range(1, 7):
+            cell = ws.cell(row=current_row, column=col)
+            cell.fill = PatternFill(start_color="2E4057", end_color="2E4057", fill_type="solid")
+            cell.border = self.border
+
+        # Подсчитываем итоги по неделям
+        for j, block in enumerate(timeline_blocks, 7):
+            week_id = block.get('week_id', block.get('block_id'))
+            week_str = str(week_id)
+
+            # Суммируем всех работников на этой неделе
+            total_workers = 0
+            for package in work_packages:
+                package_id = package.get('package_id', '')
+                schedule_info = scheduling_data.get(package_id, {})
+                staffing_per_block = schedule_info.get('staffing_per_block', package.get('staffing_per_block', {}))
+
+                # Если на этой неделе есть работники в этом пакете
+                if week_str in staffing_per_block:
+                    total_workers += staffing_per_block[week_str]
+
+            # Записываем итог
+            if total_workers > 0:
+                cell = ws.cell(row=current_row, column=j, value=total_workers)
+                cell.alignment = self.center_align
+                cell.font = Font(bold=True, color="FFFFFF")
+                cell.fill = PatternFill(start_color="2E4057", end_color="2E4057", fill_type="solid")
+                cell.border = self.border
+            else:
+                cell = ws.cell(row=current_row, column=j, value="")
+                cell.fill = PatternFill(start_color="2E4057", end_color="2E4057", fill_type="solid")
+                cell.border = self.border
+
         # Применяем форматирование
         self._format_schedule_sheet(ws, timeline_cols)
     
@@ -676,8 +772,8 @@ class MultiPageScheduleGenerator:
             # Заголовок пакета
             package_header = f"📦 ПАКЕТ {i}: {package.get('name', 'Безымянный пакет')}"
             ws.cell(row=current_row, column=1, value=package_header)
-            ws.cell(row=current_row, column=1).font = Font(bold=True, size=14, color="2E4057")
-            ws.cell(row=current_row, column=1).fill = self.subheader_fill
+            ws.cell(row=current_row, column=1).font = Font(bold=True, size=14, color="FFFFFF")
+            ws.cell(row=current_row, column=1).fill = PatternFill(start_color="2E4057", end_color="2E4057", fill_type="solid")
             ws.merge_cells(f'A{current_row}:F{current_row}')
             current_row += 1
             
@@ -757,10 +853,15 @@ class MultiPageScheduleGenerator:
             volume_data = package.get('volume_data', {})
             calculations = package.get('calculations', {})
             
-            unit = (volume_data.get('final_unit') or volume_data.get('unit') or 
-                   calculations.get('final_unit') or calculations.get('unit') or 'шт')
-            quantity = (volume_data.get('final_quantity') or volume_data.get('quantity') or 
-                       calculations.get('final_quantity') or calculations.get('quantity') or 0)
+            # Приоритет: calculations -> volume_data -> дефолт (новая структура первее)
+            unit = (calculations.get('unit') or
+                   calculations.get('final_unit') or
+                   volume_data.get('unit') or
+                   volume_data.get('final_unit') or 'шт')
+            quantity = (calculations.get('quantity') or
+                       calculations.get('final_quantity') or
+                       volume_data.get('quantity') or
+                       volume_data.get('final_quantity') or 0)
             
             # Детали пакета
             package_details = [
@@ -820,8 +921,8 @@ class MultiPageScheduleGenerator:
             ws.cell(row=current_row, column=1, value="📋 ВХОДЯЩИЕ РАБОТЫ:").font = Font(bold=True, size=12, color="2F5233")
             current_row += 1
             
-            # Заголовки для работ
-            work_headers = ["№", "Код работы", "Наименование работы", "Единица", "Количество", "Роль", "Участие"]
+            # Заголовки для работ (упрощенная таблица)
+            work_headers = ["№", "Код работы", "Наименование работы", "Единица", "Количество"]
             for col, header in enumerate(work_headers, 1):
                 cell = ws.cell(row=current_row, column=col, value=header)
                 cell.font = Font(bold=True)
@@ -838,12 +939,10 @@ class MultiPageScheduleGenerator:
                 ws.cell(row=current_row, column=2, value=work.get('code', 'N/A'))
                 ws.cell(row=current_row, column=3, value=work.get('name', 'Без названия'))
                 ws.cell(row=current_row, column=4, value=work.get('unit', 'шт')).alignment = self.center_align
-                ws.cell(row=current_row, column=5, value=str(work.get('quantity', 0))).alignment = self.right_align
-                ws.cell(row=current_row, column=6, value=work.get('role', 'основная')).alignment = self.center_align
-                ws.cell(row=current_row, column=7, value=work.get('included', 'полная')).alignment = self.center_align
+                ws.cell(row=current_row, column=5, value=str(work.get('quantity', 0))).alignment = self.center_align
                 
-                # Применяем границы
-                for col in range(1, 8):
+                # Применяем границы (только для 5 колонок)
+                for col in range(1, 6):
                     ws.cell(row=current_row, column=col).border = self.border
                     
                 current_row += 1
@@ -869,21 +968,22 @@ class MultiPageScheduleGenerator:
                     'role': 'исходная работа'
                 })
         
-        # Если не нашли в source_work_items, ищем в volume_data пакета
+        # Если не нашли в source_work_items, ищем в calculations или volume_data пакета
         if not works:
             for pkg in work_packages:
-                if pkg.get('package_id') == package_id:
+                if pkg.get('package_id') == package_id or pkg.get('id') == package_id:
+                    # Приоритет: calculations -> volume_data (новая структура первее)
+                    calculations = pkg.get('calculations', {})
                     volume_data = pkg.get('volume_data', {})
-                    component_analysis = volume_data.get('component_analysis', [])
-                    
+                    component_analysis = calculations.get('component_analysis', []) or volume_data.get('component_analysis', [])
+
                     for component in component_analysis:
                         works.append({
                             'code': component.get('code', 'N/A'),
                             'name': component.get('work_name', 'Без названия'),
                             'unit': component.get('unit', 'шт'),
                             'quantity': component.get('quantity', 0),
-                            'role': self._translate_role(component.get('role', 'unknown')),
-                            'included': self._translate_included(component.get('included', 'full'))
+                            'role': 'компонент пакета'
                         })
                     break
         
@@ -966,22 +1066,22 @@ class MultiPageScheduleGenerator:
             # Данные расчетов - универсальная логика
             volume_data = package.get('volume_data', {})
             calculations = package.get('calculations', {})
+
+            # Приоритет: calculations -> volume_data -> дефолт (новая структура первее)
+            unit = (calculations.get('unit') or
+                   calculations.get('final_unit') or
+                   volume_data.get('unit') or
+                   volume_data.get('final_unit') or 'шт')
+
+            quantity = (calculations.get('quantity') or
+                       calculations.get('final_quantity') or
+                       volume_data.get('quantity') or
+                       volume_data.get('final_quantity') or 0)
             
-            # Приоритет: volume_data -> calculations -> дефолт
-            unit = (volume_data.get('final_unit') or 
-                   volume_data.get('unit') or 
-                   calculations.get('final_unit') or 
-                   calculations.get('unit') or 'шт')
-                   
-            quantity = (volume_data.get('final_quantity') or 
-                       volume_data.get('quantity') or 
-                       calculations.get('final_quantity') or 
-                       calculations.get('quantity') or 0)
-            
-            # Логика расчета и обоснования
-            logic = (volume_data.get('calculation_logic') or 
-                    calculations.get('calculation_logic') or 
-                    calculations.get('calculation_summary') or 
+            # Логика расчета и обоснования (приоритет новой структуре)
+            logic = (calculations.get('calculation_logic') or
+                    calculations.get('calculation_summary') or
+                    volume_data.get('calculation_logic') or
                     'Логика расчета не указана')
                     
             reasoning = volume_data.get('reasoning', {})
@@ -1108,7 +1208,7 @@ class MultiPageScheduleGenerator:
         """Применяет форматирование к листу пакетов работ"""
         
         # Ширина колонок
-        ws.column_dimensions['A'].width = 5   # №
+        ws.column_dimensions['A'].width = 25  # Заголовки пакетов и метки
         ws.column_dimensions['B'].width = 20  # Код работы
         ws.column_dimensions['C'].width = 50  # Наименование работы
         ws.column_dimensions['D'].width = 12  # Единица

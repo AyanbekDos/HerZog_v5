@@ -71,22 +71,24 @@ class SchedulerAndStaffer:
                 work_packages = [item for item in work_breakdown_structure if item.get('type') == 'package']
                 logger.info(f"📊 Используем иерархическую структуру: найдено {len(work_packages)} пакетов работ")
 
-                # Обогащаем пакеты данными расчетов объемов из counter
-                volume_by_id = {vol.get('package_id'): vol for vol in volume_calculations}
+                # Обогащаем пакеты данными расчетов объемов из counter (новая структура)
+                volume_by_id = {vol.get('id'): vol for vol in volume_calculations}
                 for package in work_packages:
                     package_id = package.get('id')
                     if package_id in volume_by_id:
-                        package['volume_data'] = volume_by_id[package_id]
+                        volume_data = volume_by_id[package_id]
+                        if 'calculations' in volume_data:
+                            package['calculations'] = volume_data['calculations']
 
             elif work_packages:
                 logger.info(f"📊 Используем старую плоскую структуру: найдено {len(work_packages)} пакетов работ")
             else:
                 raise Exception("Не найдены пакеты работ с расчетами. Сначала должен быть запущен counter")
 
-            # Проверяем что пакеты имеют volume_data
-            packages_with_calcs = [p for p in work_packages if 'volume_data' in p]
+            # Проверяем что пакеты имеют calculations (новая структура) или volume_data (старая)
+            packages_with_calcs = [p for p in work_packages if 'calculations' in p or 'volume_data' in p]
             if not packages_with_calcs:
-                raise Exception("Пакеты работ не имеют volume_data. Сначала должен быть запущен counter")
+                raise Exception("Пакеты работ не имеют calculations или volume_data. Сначала должен быть запущен counter")
             
             logger.info(f"📊 Создание календарного плана для {len(packages_with_calcs)} пакетов")
             logger.info(f"📅 Временные блоки: {len(timeline_blocks)} недель")
@@ -783,31 +785,31 @@ class SchedulerAndStaffer:
     def _prepare_compact_packages(self, packages_with_calcs: List[Dict], project_path: str) -> List[Dict]:
         """
         Готовит информативные данные о пакетах для планировщика.
-        ИСПРАВЛЕНО: Теперь извлекает полную информацию из volume_data, включая component_analysis
+        ИСПРАВЛЕНО: Теперь извлекает полную информацию из calculations, включая component_analysis
         """
         compact_packages = []
 
         for package in packages_with_calcs:
-            package_id = package.get('package_id', 'unknown')
+            package_id = package.get('id', package.get('package_id', 'unknown'))
             package_name = package.get('name', package.get('package_name', f'Пакет {package_id}'))
 
-            # Читаем данные из volume_data в true.json
-            volume_data = package.get('volume_data', {})
+            # Читаем данные из calculations в true.json (новая структура)
+            calculations = package.get('calculations', {})
 
-            if not volume_data:
-                logger.warning(f"⚠️ Пакет {package_id} не имеет volume_data, пропускаем")
+            if not calculations:
+                logger.warning(f"⚠️ Пакет {package_id} не имеет calculations, пропускаем")
                 continue
 
             # Извлекаем основные данные объема
-            final_quantity = volume_data.get('quantity', 0)
-            final_unit = volume_data.get('unit', 'шт')
+            final_quantity = calculations.get('quantity', 0)
+            final_unit = calculations.get('unit', 'шт')
 
             # Извлекаем component_analysis для детальной информации о составе
-            component_analysis = volume_data.get('component_analysis', [])
+            component_analysis = calculations.get('component_analysis', [])
             source_works_count = len(component_analysis)
 
             # Определяем сложность работ
-            calculation_logic = volume_data.get('calculation_logic', '')
+            calculation_logic = calculations.get('calculation_logic', '')
             complexity = self._determine_package_complexity(package_name, calculation_logic)
 
             # Создаем расширенную структуру согласно требованиям

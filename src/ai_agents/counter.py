@@ -178,15 +178,18 @@ class WorkVolumeCalculator:
             single_work = works[0]
             logger.info(f"📋 Пакет {package_id} содержит только одну работу - копируем данные без LLM")
 
-            # Создаём результат прямо из данных работы
+            # Создаём результат прямо из данных работы с правильной структурой для volume_calculations
             calculation_result = {
                 "package_id": package_id,
                 "package_name": package.get('name'),
                 "package_description": package.get('description'),
-                "calculation": {
+                "type": "package",  # Добавляем type для совместимости
+                "id": package_id,   # Дублируем id для совместимости
+                "calculations": {
                     "unit": single_work.get('unit', ''),
                     "quantity": single_work.get('quantity', 0),
                     "applied_rule": "ПРЯМОЕ КОПИРОВАНИЕ (одна работа)",
+                    "calculation_logic": f"Прямое копирование из единственной работы: {single_work.get('name')}",
                     "calculation_steps": [
                         f"Пакет содержит только одну работу: {single_work.get('name')}",
                         f"Копируем единицу измерения: {single_work.get('unit', '')}",
@@ -467,16 +470,18 @@ class WorkVolumeCalculator:
         # Создаем словарь для быстрого поиска по package_id
         calculations_dict = {}
         for calc_package in calculated_packages:
-            package_id = calc_package.get('package_id')
+            # Поддерживаем как package_id, так и id
+            package_id = calc_package.get('package_id') or calc_package.get('id')
             calculations = calc_package.get('calculations', {})
 
             # Извлекаем данные включая обоснования для ПТО
-            calculations_dict[package_id] = {
-                'unit': calculations.get('unit', 'шт'),
-                'quantity': calculations.get('quantity', 0),
-                'calculation_logic': calculations.get('calculation_logic', 'Автоматический расчет'),
-                'component_analysis': calculations.get('component_analysis', [])
-            }
+            if package_id:  # Только если package_id найден
+                calculations_dict[package_id] = {
+                    'unit': calculations.get('unit', 'шт'),
+                    'quantity': calculations.get('quantity', 0),
+                    'calculation_logic': calculations.get('calculation_logic', 'Автоматический расчет'),
+                    'component_analysis': calculations.get('component_analysis', [])
+                }
 
         # Проверяем тип структуры и обновляем соответственно
         work_breakdown_structure = truth_data.get('results', {}).get('work_breakdown_structure', [])

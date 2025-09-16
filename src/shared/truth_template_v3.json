@@ -1,0 +1,114 @@
+{
+  "schema_version": "3.0",
+
+  "project": {
+    "id": null,
+    "name": null,
+    "source_file": null,
+    "created_at": null,
+    "updated_at": null,
+    "user_id": null,
+    "status": "created"
+  },
+
+  "configuration": {
+    "timeline": {
+      "start_date": null,
+      "end_date": null,
+      "total_weeks": null,
+      "blocks": []
+    },
+    "workforce": {
+      "min_workers": null,
+      "max_workers": null,
+      "target_average": null
+    },
+    "targets": {
+      "package_count": null
+    },
+    "directives": {
+      "work_packager": "",
+      "counter": "",
+      "scheduler": ""
+    }
+  },
+
+  "pipeline": {
+    "current_stage": "created",
+    "agents": {
+      "extractor": {
+        "status": "pending",
+        "started_at": null,
+        "completed_at": null,
+        "result_summary": {}
+      },
+      "classifier": {
+        "status": "pending",
+        "started_at": null,
+        "completed_at": null,
+        "result_summary": {}
+      },
+      "preparer": {
+        "status": "pending",
+        "started_at": null,
+        "completed_at": null,
+        "result_summary": {}
+      },
+      "work_packager": {
+        "status": "pending",
+        "started_at": null,
+        "completed_at": null,
+        "result_summary": {}
+      },
+      "works_to_packages": {
+        "status": "pending",
+        "started_at": null,
+        "completed_at": null,
+        "result_summary": {}
+      },
+      "counter": {
+        "status": "pending",
+        "started_at": null,
+        "completed_at": null,
+        "result_summary": {}
+      },
+      "scheduler": {
+        "status": "pending",
+        "started_at": null,
+        "completed_at": null,
+        "result_summary": {}
+      }
+    }
+  },
+
+  "source_data": {
+    "work_items": []
+  },
+
+  "project_hierarchy": [],
+
+  "project_summary": {
+    "totals": {
+      "categories": 0,
+      "packages": 0,
+      "work_items": 0,
+      "materials": 0,
+      "other_items": 0
+    },
+    "timeline_summary": {
+      "total_duration_weeks": 0,
+      "active_weeks": 0,
+      "peak_workforce": 0,
+      "average_workforce": 0,
+      "workforce_utilization": {}
+    },
+    "cost_summary": {
+      "currency": "RUB",
+      "total_estimated_cost": null,
+      "cost_by_category": {},
+      "cost_calculated": false
+    }
+  },
+
+  "audit_log": []
+}
