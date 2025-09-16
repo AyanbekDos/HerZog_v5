@@ -57,13 +57,22 @@ class WorkVolumeCalculator:
             os.makedirs(agent_folder, exist_ok=True)
             
             # Извлекаем входные данные
-            work_packages = truth_data.get('results', {}).get('work_packages', [])
+            # Поддерживаем как новую иерархическую структуру, так и старую плоскую
+            work_breakdown_structure = truth_data.get('results', {}).get('work_breakdown_structure', [])
+            work_packages = truth_data.get('results', {}).get('work_packages', [])  # Fallback для старых проектов
+
+            # Если есть новая иерархическая структура, извлекаем пакеты из неё
+            if work_breakdown_structure:
+                work_packages = [item for item in work_breakdown_structure if item.get('type') == 'package']
+                logger.info(f"📊 Используем иерархическую структуру: найдено {len(work_packages)} пакетов работ")
+            elif work_packages:
+                logger.info(f"📊 Используем старую плоскую структуру: найдено {len(work_packages)} пакетов работ")
+            else:
+                raise Exception("Не найдены пакеты работ. Сначала должен быть запущен work_packager")
+
             source_work_items = truth_data.get('source_work_items', [])
             agent_directives = truth_data.get('project_inputs', {}).get('agent_directives', {})
             user_directive = agent_directives.get('counter') or agent_directives.get('accountant', '')
-            
-            if not work_packages:
-                raise Exception("Не найдены пакеты работ. Сначала должен быть запущен work_packager")
             
             # Проверяем что работы имеют назначения к пакетам
             works_with_packages = [w for w in source_work_items if w.get('package_id')]
@@ -126,11 +135,12 @@ class WorkVolumeCalculator:
         packages_with_works = []
         
         for package in work_packages:
-            package_id = package.get('package_id')
-            
+            # Поддерживаем как новый формат (id), так и старый (package_id)
+            package_id = package.get('id') or package.get('package_id')
+
             # Находим все работы этого пакета
             package_works = [
-                work for work in source_work_items 
+                work for work in source_work_items
                 if work.get('package_id') == package_id
             ]
             
@@ -159,12 +169,62 @@ class WorkVolumeCalculator:
         Рассчитывает объемы для одного пакета работ
         """
         package = package_data['package']
-        package_id = package.get('package_id')
-        
-        # Подготавливаем входные данные для AI
+        # Поддерживаем как новый формат (id), так и старый (package_id)
+        package_id = package.get('id') or package.get('package_id')
+        works = package_data['works']
+
+        # ОПТИМИЗАЦИЯ: если в пакете только одна работа, копируем её данные без LLM
+        if len(works) == 1:
+            single_work = works[0]
+            logger.info(f"📋 Пакет {package_id} содержит только одну работу - копируем данные без LLM")
+
+            # Создаём результат прямо из данных работы
+            calculation_result = {
+                "package_id": package_id,
+                "package_name": package.get('name'),
+                "package_description": package.get('description'),
+                "calculation": {
+                    "unit": single_work.get('unit', ''),
+                    "quantity": single_work.get('quantity', 0),
+                    "applied_rule": "ПРЯМОЕ КОПИРОВАНИЕ (одна работа)",
+                    "calculation_steps": [
+                        f"Пакет содержит только одну работу: {single_work.get('name')}",
+                        f"Копируем единицу измерения: {single_work.get('unit', '')}",
+                        f"Копируем объем: {single_work.get('quantity', 0)}"
+                    ],
+                    "component_analysis": [
+                        {
+                            "work_name": single_work.get('name', ''),
+                            "unit": single_work.get('unit', ''),
+                            "quantity": single_work.get('quantity', 0)
+                        }
+                    ]
+                },
+                "created_at": datetime.now().isoformat(),
+                "calculation_method": "direct_copy"
+            }
+
+            # Сохраняем информацию об оптимизации для отладки
+            debug_data = {
+                "package": package,
+                "works": works,
+                "optimization": "single_work_direct_copy",
+                "result": calculation_result,
+                "meta": {
+                    "package_id": package_id,
+                    "works_count": 1
+                }
+            }
+            input_path = os.path.join(agent_folder, f"{package_id}_input.json")
+            with open(input_path, 'w', encoding='utf-8') as f:
+                json.dump(debug_data, f, ensure_ascii=False, indent=2)
+
+            return calculation_result
+
+        # Подготавливаем входные данные для AI (когда работ больше одной)
         input_data = {
             'package': package,
-            'works': package_data['works'],
+            'works': works,
             'user_directive': user_directive
         }
         
@@ -402,17 +462,14 @@ class WorkVolumeCalculator:
     def _update_truth_data(self, truth_data: Dict, calculated_packages: List[Dict], truth_path: str):
         """
         Обновляет true.json с результатами расчетов
-        Добавляет только необходимые данные для Excel отчета
+        Поддерживает как иерархическую, так и плоскую структуру
         """
-        # Получаем текущие work_packages
-        current_packages = truth_data.get('results', {}).get('work_packages', [])
-        
         # Создаем словарь для быстрого поиска по package_id
         calculations_dict = {}
         for calc_package in calculated_packages:
             package_id = calc_package.get('package_id')
             calculations = calc_package.get('calculations', {})
-            
+
             # Извлекаем данные включая обоснования для ПТО
             calculations_dict[package_id] = {
                 'unit': calculations.get('unit', 'шт'),
@@ -420,16 +477,36 @@ class WorkVolumeCalculator:
                 'calculation_logic': calculations.get('calculation_logic', 'Автоматический расчет'),
                 'component_analysis': calculations.get('component_analysis', [])
             }
-        
-        # Обновляем каждый пакет минимальными данными
-        for package in current_packages:
-            package_id = package.get('package_id')
-            if package_id in calculations_dict:
-                # Добавляем только самое нужное
-                package['volume_data'] = calculations_dict[package_id]
-        
-        # Обновляем work_packages в true.json
-        truth_data['results']['work_packages'] = current_packages
+
+        # Проверяем тип структуры и обновляем соответственно
+        work_breakdown_structure = truth_data.get('results', {}).get('work_breakdown_structure', [])
+
+        if work_breakdown_structure:
+            # Новая иерархическая структура - обновляем пакеты в work_breakdown_structure
+            for item in work_breakdown_structure:
+                if item.get('type') == 'package':
+                    package_id = item.get('id')
+                    if package_id in calculations_dict:
+                        item['volume_data'] = calculations_dict[package_id]
+
+            # Обновляем иерархическую структуру
+            truth_data['results']['work_breakdown_structure'] = work_breakdown_structure
+
+            # Также сохраняем в volume_calculations для scheduler
+            truth_data['results']['volume_calculations'] = calculated_packages
+
+        else:
+            # Старая плоская структура - работаем с work_packages
+            current_packages = truth_data.get('results', {}).get('work_packages', [])
+
+            # Обновляем каждый пакет минимальными данными
+            for package in current_packages:
+                package_id = package.get('package_id')
+                if package_id in calculations_dict:
+                    package['volume_data'] = calculations_dict[package_id]
+
+            # Обновляем work_packages в true.json
+            truth_data['results']['work_packages'] = current_packages
         
         # Добавляем минимальную сводную статистику
         units_summary = defaultdict(float)

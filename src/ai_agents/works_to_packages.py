@@ -59,13 +59,18 @@ class WorksToPackagesAssigner:
             os.makedirs(agent_folder, exist_ok=True)
             
             # Извлекаем входные данные
-            work_packages = truth_data.get('results', {}).get('work_packages', [])
+            work_breakdown_structure = truth_data.get('results', {}).get('work_breakdown_structure', [])
+            # Для совместимости со старой схемой
+            if not work_breakdown_structure:
+                work_breakdown_structure = truth_data.get('results', {}).get('work_packages', [])
+
             source_work_items = truth_data.get('source_work_items', [])
-            
-            if not work_packages:
-                raise Exception("Не найдены пакеты работ. Сначала должен быть запущен work_packager")
-            
-            logger.info(f"📊 Обработка {len(source_work_items)} работ в {len(work_packages)} пакетов")
+
+            if not work_breakdown_structure:
+                raise Exception("Не найдена структура пакетов работ. Сначала должен быть запущен work_packager")
+
+            packages_count = len([item for item in work_breakdown_structure if item.get('type') == 'package'])
+            logger.info(f"📊 Обработка {len(source_work_items)} работ в {packages_count} пакетов из иерархической структуры")
             
             # Загружаем промпт
             prompt_template = self._load_prompt()
@@ -83,7 +88,7 @@ class WorksToPackagesAssigner:
                 
                 # Обрабатываем батч
                 batch_result = await self._process_batch(
-                    batch_works, work_packages, prompt_template, 
+                    batch_works, work_breakdown_structure, prompt_template,
                     batch_num, agent_folder
                 )
                 
@@ -119,14 +124,14 @@ class WorksToPackagesAssigner:
                 'agent': self.agent_name
             }
     
-    async def _process_batch(self, batch_works: List[Dict], work_packages: List[Dict],
+    async def _process_batch(self, batch_works: List[Dict], work_breakdown_structure: List[Dict],
                            prompt_template: str, batch_num: int, agent_folder: str) -> List[Dict]:
         """
-        Обрабатывает один батч работ
+        Обрабатывает один батч работ с новой иерархической структурой
         """
         # Подготавливаем входные данные для батча
         input_data = {
-            'batch_works': [
+            'works_to_assign': [
                 {
                     'id': work.get('id'),
                     'name': work.get('name', ''),
@@ -134,7 +139,7 @@ class WorksToPackagesAssigner:
                 }
                 for work in batch_works
             ],
-            'work_packages': work_packages,
+            'work_breakdown_structure': work_breakdown_structure,
             'batch_number': batch_num + 1
         }
         
@@ -146,14 +151,14 @@ class WorksToPackagesAssigner:
 
         # Сохраняем РЕАЛЬНЫЕ входные данные для отладки
         debug_data = {
-            "batch_works": input_data['batch_works'],      # РЕАЛЬНЫЕ данные работ
-            "work_packages": input_data['work_packages'],  # РЕАЛЬНЫЕ данные пакетов
+            "works_to_assign": input_data['works_to_assign'],              # РЕАЛЬНЫЕ данные работ
+            "work_breakdown_structure": input_data['work_breakdown_structure'], # РЕАЛЬНЫЕ данные структуры
             "system_instruction": salted_system_instruction,
             "user_prompt": user_prompt,
             "meta": {
                 "batch_number": input_data['batch_number'],
-                "works_count": len(input_data['batch_works']),
-                "packages_count": len(input_data['work_packages'])
+                "works_count": len(input_data['works_to_assign']),
+                "structure_items_count": len(input_data['work_breakdown_structure'])
             }
         }
         batch_input_path = os.path.join(agent_folder, f"batch_{batch_num+1:03d}_input.json")
@@ -247,8 +252,8 @@ class WorksToPackagesAssigner:
 
         # User prompt - только JSON с работами
         user_prompt_data = {
-            'work_packages': input_data['work_packages'],
-            'batch_works': input_data['batch_works'],
+            'work_breakdown_structure': input_data['work_breakdown_structure'],
+            'works_to_assign': input_data['works_to_assign'],
             'batch_number': input_data['batch_number']
         }
         user_prompt = json.dumps(user_prompt_data, ensure_ascii=False, indent=2)

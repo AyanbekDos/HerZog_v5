@@ -104,10 +104,13 @@ class WorkPackager:
                 raise Exception(f"Ошибка Claude API: {gemini_response.get('error', 'Неизвестная ошибка')}")
             
             # Обрабатываем ответ
-            work_packages = self._process_llm_response(gemini_response['response'])
-            
-            # Обновляем true.json
-            truth_data['results']['work_packages'] = work_packages
+            work_breakdown_structure = self._process_llm_response(gemini_response['response'])
+
+            # Обновляем true.json с новой иерархической структурой
+            truth_data['results']['work_breakdown_structure'] = work_breakdown_structure
+
+            # Подсчитываем количество пакетов для совместимости с остальной системой
+            packages_count = len([item for item in work_breakdown_structure if item.get('type') == 'package'])
             
             with open(truth_path, 'w', encoding='utf-8') as f:
                 json.dump(truth_data, f, ensure_ascii=False, indent=2)
@@ -116,11 +119,13 @@ class WorkPackager:
             update_pipeline_status(truth_path, self.agent_name, "completed")
             
             logger.info(f"✅ Агент {self.agent_name} завершен успешно")
-            logger.info(f"📊 Создано {len(work_packages)} пакетов работ")
-            
+            logger.info(f"📊 Создана иерархическая структура: {packages_count} пакетов работ в {len(work_breakdown_structure) - packages_count} категориях")
+
             return {
                 'success': True,
-                'work_packages_created': len(work_packages),
+                'work_packages_created': packages_count,
+                'categories_created': len(work_breakdown_structure) - packages_count,
+                'total_structure_items': len(work_breakdown_structure),
                 'agent': self.agent_name
             }
             
@@ -241,32 +246,55 @@ class WorkPackager:
     
     def _process_llm_response(self, llm_response: Any) -> List[Dict]:
         """
-        Обрабатывает ответ от LLM и извлекает пакеты работ
+        Обрабатывает ответ от LLM и извлекает иерархическую структуру пакетов работ
         """
         try:
             if isinstance(llm_response, str):
                 response_data = json.loads(llm_response)
             else:
                 response_data = llm_response
-                
-            work_packages = response_data.get('work_packages', [])
-            
+
+            work_breakdown_structure = response_data.get('work_breakdown_structure', [])
+
             # Валидация и очистка данных
-            validated_packages = []
-            for i, package in enumerate(work_packages):
-                package_id = package.get('package_id', f'pkg_{i+1:03d}')
-                name = package.get('name', f'Пакет работ {i+1}')
-                description = package.get('description', '')
-                
-                validated_packages.append({
-                    'package_id': package_id,
-                    'name': name,
-                    'description': description,
-                    'created_at': datetime.now().isoformat()
-                })
-            
-            return validated_packages
-            
+            validated_structure = []
+            cat_counter = 1
+            pkg_counter = 1
+
+            for item in work_breakdown_structure:
+                item_type = item.get('type', 'package')
+                name = item.get('name', '')
+
+                if item_type == 'category':
+                    # Валидация категории
+                    category_id = item.get('id', f'cat_{cat_counter:03d}')
+                    validated_structure.append({
+                        'id': category_id,
+                        'type': 'category',
+                        'name': name or f'Категория {cat_counter}',
+                        'parent_id': None,
+                        'created_at': datetime.now().isoformat()
+                    })
+                    cat_counter += 1
+
+                elif item_type == 'package':
+                    # Валидация пакета работ
+                    package_id = item.get('id', f'pkg_{pkg_counter:03d}')
+                    parent_id = item.get('parent_id', '')
+                    description = item.get('description', '')
+
+                    validated_structure.append({
+                        'id': package_id,
+                        'type': 'package',
+                        'name': name or f'Пакет работ {pkg_counter}',
+                        'description': description,
+                        'parent_id': parent_id,
+                        'created_at': datetime.now().isoformat()
+                    })
+                    pkg_counter += 1
+
+            return validated_structure
+
         except (json.JSONDecodeError, KeyError, AttributeError) as e:
             logger.error(f"❌ КРИТИЧЕСКАЯ ОШИБКА парсинга ответа LLM: {e}")
             logger.error(f"Сырой ответ от Claude: {llm_response}")

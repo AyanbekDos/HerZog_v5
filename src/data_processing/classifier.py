@@ -233,11 +233,9 @@ async def classify_items(master_list: List[Dict], progress_callback=None, projec
             # Обновляем классификацию для найденных позиций
             updated_count = 0
             for item_uuid, gemini_result in gemini_results.items():
-                # Находим соответствующий элемент в classified_list
-                original_item = gemini_result['original_item']
-
+                # item_uuid это ID позиции, которую нужно обновить
                 for classified_item in classified_list:
-                    if classified_item.get('id') == original_item.get('id'):
+                    if classified_item.get('id') == item_uuid:
 
                         # Конвертируем результат Claude
                         converted_result = convert_gemini_result(gemini_result)

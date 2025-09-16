@@ -18,17 +18,52 @@ __pycache__/
 .vscode/
 .claude/
 
-# Test results
+# Test files and testing artifacts
+test_*.py
+*_test.py
 test_results/
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+.nox/
+debug_*.py
+experimental_*.py
 
-# Temporary files
+# Temporary and debug files
 temp_uploads/
+temp/
+tmp/
+debug/
+snapshot*.txt
+*.tmp
+*.bak
+*.swp
+*.swo
+*~
+
+# Output files
+output/
+reports/
+generated/
+*.xlsx
+*.pdf
 
 # OS generated files
 .DS_Store
 Thumbs.db
+*.DS_Store
 
-# Project data
+# Project data and working directories
 projects/
 examples/
 grf/
+
+# Backup files
+*.backup
+*.gemini_backup
+
+# Dependencies and packages
+dist/
+build/
+*.egg-info/

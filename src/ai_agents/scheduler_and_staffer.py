@@ -59,13 +59,30 @@ class SchedulerAndStaffer:
             os.makedirs(agent_folder, exist_ok=True)
             
             # Извлекаем входные данные
-            work_packages = truth_data.get('results', {}).get('work_packages', [])
+            # Поддерживаем как новую иерархическую структуру, так и старую плоскую
+            work_breakdown_structure = truth_data.get('results', {}).get('work_breakdown_structure', [])
+            work_packages = truth_data.get('results', {}).get('work_packages', [])  # Fallback для старых проектов
+            volume_calculations = truth_data.get('results', {}).get('volume_calculations', [])
             timeline_blocks = truth_data.get('timeline_blocks', [])
             project_inputs = truth_data.get('project_inputs', {})
-            
-            if not work_packages:
+
+            # Если есть новая иерархическая структура, извлекаем пакеты из неё
+            if work_breakdown_structure:
+                work_packages = [item for item in work_breakdown_structure if item.get('type') == 'package']
+                logger.info(f"📊 Используем иерархическую структуру: найдено {len(work_packages)} пакетов работ")
+
+                # Обогащаем пакеты данными расчетов объемов из counter
+                volume_by_id = {vol.get('package_id'): vol for vol in volume_calculations}
+                for package in work_packages:
+                    package_id = package.get('id')
+                    if package_id in volume_by_id:
+                        package['volume_data'] = volume_by_id[package_id]
+
+            elif work_packages:
+                logger.info(f"📊 Используем старую плоскую структуру: найдено {len(work_packages)} пакетов работ")
+            else:
                 raise Exception("Не найдены пакеты работ с расчетами. Сначала должен быть запущен counter")
-            
+
             # Проверяем что пакеты имеют volume_data
             packages_with_calcs = [p for p in work_packages if 'volume_data' in p]
             if not packages_with_calcs:
@@ -645,36 +662,73 @@ class SchedulerAndStaffer:
     def _update_truth_data(self, truth_data: Dict, scheduled_packages: List[Dict], truth_path: str):
         """
         Обновляет true.json с финальным календарным планом
-        СОХРАНЯЯ volume_data от Counter агента
+        Поддерживает как иерархическую, так и плоскую структуру
         """
-        # ИСПРАВЛЕНО: Объединяем scheduled_packages с существующими данными (volume_data)
-        existing_packages = truth_data.get('results', {}).get('work_packages', [])
-        existing_by_id = {pkg.get('package_id'): pkg for pkg in existing_packages}
-        
-        # Объединяем данные: берем календарный план из scheduled_packages + volume_data из existing
-        merged_packages = []
-        for scheduled_pkg in scheduled_packages:
-            package_id = scheduled_pkg.get('package_id')
-            existing_pkg = existing_by_id.get(package_id, {})
-            
-            # Объединяем: scheduled (календарь) + existing (volume_data)
-            merged_pkg = scheduled_pkg.copy()
-            
-            # Сохраняем volume_data от Counter агента, если есть
-            if 'volume_data' in existing_pkg:
-                merged_pkg['volume_data'] = existing_pkg['volume_data']
+        work_breakdown_structure = truth_data.get('results', {}).get('work_breakdown_structure', [])
 
-            # СОХРАНЯЕМ ИМЯ ПАКЕТА от work_packager, если есть
-            if 'name' in existing_pkg:
-                merged_pkg['name'] = existing_pkg['name']
+        if work_breakdown_structure:
+            # Новая иерархическая структура
+            logger.info("💾 Обновляем иерархическую структуру с календарными данными")
 
-            # СОХРАНЯЕМ ОПИСАНИЕ ПАКЕТА от work_packager, если есть
-            if 'description' in existing_pkg:
-                merged_pkg['description'] = existing_pkg['description']
+            # Создаем индекс scheduled_packages по package_id
+            schedule_by_id = {}
+            for scheduled_pkg in scheduled_packages:
+                package_id = scheduled_pkg.get('package_id')
+                schedule_by_id[package_id] = scheduled_pkg
 
-            merged_packages.append(merged_pkg)
-        
-        truth_data['results']['work_packages'] = merged_packages
+            # Обновляем пакеты в work_breakdown_structure
+            for item in work_breakdown_structure:
+                if item.get('type') == 'package':
+                    package_id = item.get('id')
+                    if package_id in schedule_by_id:
+                        scheduled_data = schedule_by_id[package_id]
+
+                        # Добавляем календарные данные к пакету
+                        item.update({
+                            'schedule_blocks': scheduled_data.get('schedule_blocks', []),
+                            'progress_per_block': scheduled_data.get('progress_per_block', {}),
+                            'staffing_per_block': scheduled_data.get('staffing_per_block', {}),
+                            'scheduling_reasoning': scheduled_data.get('scheduling_reasoning', {})
+                        })
+
+            # Обновляем иерархическую структуру
+            truth_data['results']['work_breakdown_structure'] = work_breakdown_structure
+
+            # Также сохраняем в scheduled_packages для совместимости
+            truth_data['results']['scheduled_packages'] = scheduled_packages
+
+        else:
+            # Старая плоская структура - работаем с work_packages
+            logger.info("💾 Обновляем плоскую структуру с календарными данными")
+
+            existing_packages = truth_data.get('results', {}).get('work_packages', [])
+            existing_by_id = {pkg.get('package_id'): pkg for pkg in existing_packages}
+
+            # Объединяем данные: берем календарный план из scheduled_packages + volume_data из existing
+            merged_packages = []
+            for scheduled_pkg in scheduled_packages:
+                package_id = scheduled_pkg.get('package_id')
+                existing_pkg = existing_by_id.get(package_id, {})
+
+                # Объединяем: scheduled (календарь) + existing (volume_data)
+                merged_pkg = scheduled_pkg.copy()
+
+                # Сохраняем volume_data от Counter агента, если есть
+                if 'volume_data' in existing_pkg:
+                    merged_pkg['volume_data'] = existing_pkg['volume_data']
+
+                # СОХРАНЯЕМ ИМЯ ПАКЕТА от work_packager, если есть
+                if 'name' in existing_pkg:
+                    merged_pkg['name'] = existing_pkg['name']
+
+                # СОХРАНЯЕМ ОПИСАНИЕ ПАКЕТА от work_packager, если есть
+                if 'description' in existing_pkg:
+                    merged_pkg['description'] = existing_pkg['description']
+
+                merged_packages.append(merged_pkg)
+
+            # Обновляем work_packages для старой структуры
+            truth_data['results']['work_packages'] = merged_packages
         
         # Создаем сводную информацию о календарном плане
         schedule_summary = self._create_schedule_summary(scheduled_packages, truth_data.get('timeline_blocks', []))

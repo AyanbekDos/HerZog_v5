@@ -78,18 +78,23 @@ class MultiPageScheduleGenerator:
                 truth_data = json.load(f)
             
             # Определяем версию структуры
-            structure_version = truth_data.get('meta', {}).get('structure_version', '1.0')
-            logger.info(f"📊 Обработка true.json версии {structure_version}")
-            
+            # Проверяем наличие work_breakdown_structure как индикатор новой версии
+            has_hierarchical_structure = bool(truth_data.get('results', {}).get('work_breakdown_structure'))
+            structure_version = truth_data.get('meta', {}).get('structure_version', '2.0' if has_hierarchical_structure else '1.0')
+
+            logger.info(f"📊 Обработка true.json версии {structure_version} (иерархия: {has_hierarchical_structure})")
+
             # Извлекаем данные в зависимости от версии
-            if structure_version == "2.0":
+            if has_hierarchical_structure or structure_version == "2.0":
                 extracted_data = self._extract_data_v2(truth_data)
             else:
                 extracted_data = self._extract_data_v1(truth_data)
-            
+
             work_packages = extracted_data['work_packages']
             timeline_blocks = extracted_data['timeline_blocks']
             project_info = extracted_data['project_info']
+            categories = extracted_data.get('categories', [])
+            is_hierarchical = extracted_data.get('is_hierarchical', False)
             
             if not work_packages:
                 raise Exception("Нет пакетов работ для создания календарного графика")
@@ -108,7 +113,10 @@ class MultiPageScheduleGenerator:
             # Лист 1: 📊 График (Gantt)
             ws_schedule = wb.active
             ws_schedule.title = "📊 График"
-            self._create_schedule_sheet(ws_schedule, work_packages, timeline_blocks, project_info, scheduling_data)
+            if is_hierarchical and categories:
+                self._create_hierarchical_schedule_sheet(ws_schedule, categories, work_packages, timeline_blocks, project_info)
+            else:
+                self._create_schedule_sheet(ws_schedule, work_packages, timeline_blocks, project_info, scheduling_data)
             
             # Лист 2: 📅 Планирование и Обоснования (НОВЫЙ!)
             ws_reasoning = wb.create_sheet("📅 Планирование")
@@ -178,23 +186,49 @@ class MultiPageScheduleGenerator:
             return {}
     
     def _extract_data_v2(self, truth_data: Dict) -> Dict[str, Any]:
-        """Извлекает данные из структуры v2.0"""
-        return {
-            'work_packages': truth_data.get('results', {}).get('work_packages', []),
-            'timeline_blocks': truth_data.get('timeline_blocks', []),
-            'project_info': {
-                'project_name': truth_data.get('meta', {}).get('project_name', 'Проект'),
-                'created_at': truth_data.get('meta', {}).get('created_at'),
-                'structure_version': '2.0'
-            },
-            'user_inputs': truth_data.get('user_inputs', {}),
-            'pipeline_status': truth_data.get('pipeline', {})
-        }
+        """Извлекает данные из структуры v2.0 с поддержкой иерархии"""
+        # Проверяем, есть ли новая иерархическая структура
+        work_breakdown_structure = truth_data.get('results', {}).get('work_breakdown_structure', [])
+
+        if work_breakdown_structure:
+            # Новая иерархическая структура
+            categories, packages = self._parse_hierarchical_structure(work_breakdown_structure, truth_data)
+            return {
+                'work_packages': packages,
+                'categories': categories,
+                'hierarchical_structure': work_breakdown_structure,
+                'is_hierarchical': True,
+                'timeline_blocks': truth_data.get('timeline_blocks', []),
+                'project_info': {
+                    'project_name': truth_data.get('meta', {}).get('project_name', 'Проект'),
+                    'created_at': truth_data.get('meta', {}).get('created_at'),
+                    'structure_version': '2.0-hierarchical'
+                },
+                'user_inputs': truth_data.get('user_inputs', {}),
+                'pipeline_status': truth_data.get('pipeline', {})
+            }
+        else:
+            # Старая плоская структура
+            return {
+                'work_packages': truth_data.get('results', {}).get('work_packages', []),
+                'categories': [],
+                'is_hierarchical': False,
+                'timeline_blocks': truth_data.get('timeline_blocks', []),
+                'project_info': {
+                    'project_name': truth_data.get('meta', {}).get('project_name', 'Проект'),
+                    'created_at': truth_data.get('meta', {}).get('created_at'),
+                    'structure_version': '2.0'
+                },
+                'user_inputs': truth_data.get('user_inputs', {}),
+                'pipeline_status': truth_data.get('pipeline', {})
+            }
     
     def _extract_data_v1(self, truth_data: Dict) -> Dict[str, Any]:
         """Извлекает данные из структуры v1.0"""
         return {
             'work_packages': truth_data.get('results', {}).get('work_packages', []),
+            'categories': [],
+            'is_hierarchical': False,
             'timeline_blocks': truth_data.get('timeline_blocks', []),
             'project_info': {
                 'project_name': truth_data.get('project_inputs', {}).get('project_name', 'Проект'),
@@ -204,7 +238,267 @@ class MultiPageScheduleGenerator:
             'user_inputs': truth_data.get('project_inputs', {}),
             'pipeline_status': truth_data.get('metadata', {}).get('pipeline_status', [])
         }
-    
+
+    def _parse_hierarchical_structure(self, work_breakdown_structure: List[Dict], truth_data: Dict) -> Tuple[List[Dict], List[Dict]]:
+        """
+        Парсит иерархическую структуру и подготавливает данные для красивого отображения
+
+        Returns:
+            Tuple[List[Dict], List[Dict]]: (categories, packages_with_data)
+        """
+        categories = []
+        packages = []
+
+        # Получаем данные из результатов агентов
+        scheduled_packages = truth_data.get('results', {}).get('scheduled_packages', [])
+        package_assignments = truth_data.get('results', {}).get('package_assignments', {})
+        volume_calculations = truth_data.get('results', {}).get('volume_calculations', [])
+
+        # Создаем индексы для быстрого поиска
+        schedule_by_id = {pkg.get('package_id'): pkg for pkg in scheduled_packages}
+        volume_by_id = {vol.get('package_id'): vol for vol in volume_calculations}
+
+        # Если нет отдельных scheduled_packages, извлекаем данные из work_breakdown_structure напрямую
+        if not scheduled_packages:
+            logger.info("📊 Используем данные напрямую из work_breakdown_structure (календарь в пакетах)")
+            schedule_by_id = {}
+            for item in work_breakdown_structure:
+                if item.get('type') == 'package':
+                    package_id = item.get('id')
+                    schedule_by_id[package_id] = {
+                        'package_id': package_id,
+                        'schedule_blocks': item.get('schedule_blocks', []),
+                        'progress_per_block': item.get('progress_per_block', {}),
+                        'staffing_per_block': item.get('staffing_per_block', {}),
+                        'scheduling_reasoning': item.get('scheduling_reasoning', {})
+                    }
+
+        # Обрабатываем структуру
+        for item in work_breakdown_structure:
+            if item.get('type') == 'category':
+                categories.append({
+                    'id': item.get('id'),
+                    'name': item.get('name'),
+                    'child_packages': []
+                })
+            elif item.get('type') == 'package':
+                package_id = item.get('id')
+
+                # Собираем все данные пакета
+                package_data = {
+                    'package_id': package_id,
+                    'name': item.get('name'),
+                    'description': item.get('description', ''),
+                    'parent_id': item.get('parent_id'),
+                    'category_name': self._find_category_name(item.get('parent_id'), work_breakdown_structure),
+
+                    # Данные планирования
+                    'schedule_blocks': schedule_by_id.get(package_id, {}).get('schedule_blocks', []),
+                    'progress_per_block': schedule_by_id.get(package_id, {}).get('progress_per_block', {}),
+                    'staffing_per_block': schedule_by_id.get(package_id, {}).get('staffing_per_block', {}),
+                    'scheduling_reasoning': schedule_by_id.get(package_id, {}).get('scheduling_reasoning', {}),
+
+                    # Данные объемов - сначала из volume_calculations, потом из самого пакета
+                    'volume_data': volume_by_id.get(package_id, {}) or item.get('volume_data', {}),
+                    'calculations': volume_by_id.get(package_id, {}).get('calculation', {}) or item.get('volume_data', {})
+                }
+
+                packages.append(package_data)
+
+                # Добавляем пакет к соответствующей категории
+                for category in categories:
+                    if category['id'] == item.get('parent_id'):
+                        category['child_packages'].append(package_data)
+                        break
+
+        return categories, packages
+
+    def _find_category_name(self, category_id: str, work_breakdown_structure: List[Dict]) -> str:
+        """Находит название категории по её ID"""
+        for item in work_breakdown_structure:
+            if item.get('type') == 'category' and item.get('id') == category_id:
+                return item.get('name', 'Без категории')
+        return 'Без категории'
+
+    def _create_hierarchical_schedule_sheet(self, ws, categories: List[Dict], work_packages: List[Dict], timeline_blocks: List[Dict], project_info: Dict):
+        """Создает красивый иерархический лист с календарным графиком"""
+
+        # Заголовок документа
+        ws['A1'] = "📊 КАЛЕНДАРНЫЙ ГРАФИК ПРОИЗВОДСТВА РАБОТ (ИЕРАРХИЧЕСКИЙ)"
+        ws.merge_cells('A1:H1')
+        ws['A1'].font = Font(bold=True, size=16, color="366092")
+        ws['A1'].alignment = self.center_align
+
+        # Информация о проекте
+        ws['A2'] = f"Проект: {project_info.get('project_name', 'Безымянный проект')}"
+        ws.merge_cells('A2:H2')
+        ws['A2'].font = Font(bold=True, size=12)
+        ws['A2'].alignment = self.center_align
+
+        ws['A3'] = f"Создан: {self._format_datetime(project_info.get('created_at'))}"
+        ws.merge_cells('A3:H3')
+        ws['A3'].font = Font(size=10)
+        ws['A3'].alignment = self.center_align
+
+        # Специальные стили для иерархии
+        category_fill = PatternFill(start_color="1E3A8A", end_color="1E3A8A", fill_type="solid")  # Темно-синий
+        category_font = Font(color="FFFFFF", bold=True, size=12)
+        package_fill = PatternFill(start_color="3B82F6", end_color="3B82F6", fill_type="solid")  # Синий
+        package_font = Font(color="FFFFFF", bold=True, size=10)
+
+        # Заголовки колонок (строка 5)
+        headers = [
+            "№ п/п",
+            "Категория / Пакет работ",
+            "Ед. изм.",
+            "Кол-во",
+            "Начало",
+            "Окончание",
+            "Календарный план по неделям"
+        ]
+
+        for col, header in enumerate(headers, 1):
+            cell = ws.cell(row=5, column=col, value=header)
+            cell.font = self.header_font
+            cell.fill = self.header_fill
+            cell.alignment = self.center_align
+            cell.border = self.border
+
+        # Объединяем "Календарный план" на нужное количество колонок
+        timeline_cols = len(timeline_blocks)
+        if timeline_cols > 1:
+            ws.merge_cells(f'G5:{get_column_letter(6 + timeline_cols)}5')
+
+        # Заголовки недель (строка 6)
+        for i, block in enumerate(timeline_blocks, 7):
+            week_id = block.get('week_id', block.get('block_id', i-6))
+            start_date = datetime.fromisoformat(block['start_date']).strftime('%d.%m')
+            end_date = datetime.fromisoformat(block['end_date']).strftime('%d.%m')
+
+            cell = ws.cell(row=6, column=i, value=f"Нед.{week_id}\n{start_date}-{end_date}")
+            cell.font = Font(size=8, bold=True)
+            cell.fill = self.info_fill
+            cell.alignment = self.center_align
+            cell.border = self.border
+
+        ws.row_dimensions[6].height = 30
+
+        # Заполняем данные иерархически
+        current_row = 7
+        package_counter = 1
+
+        for category in categories:
+            # Строка категории
+            ws.cell(row=current_row, column=1, value="").alignment = self.center_align
+
+            # Название категории (объединяем колонки)
+            category_name = f"📁 {category.get('name', 'Без названия')}"
+            ws.cell(row=current_row, column=2, value=category_name)
+            ws.merge_cells(f'B{current_row}:{get_column_letter(6 + timeline_cols)}{current_row}')
+
+            # Стиль категории
+            for col in range(1, 7 + timeline_cols):
+                cell = ws.cell(row=current_row, column=col)
+                cell.fill = category_fill
+                cell.font = category_font
+                cell.alignment = self.left_align
+                cell.border = self.thick_border
+
+            ws.row_dimensions[current_row].height = 25
+            current_row += 1
+
+            # Пакеты внутри категории
+            for package in category.get('child_packages', []):
+                # Номер п/п
+                ws.cell(row=current_row, column=1, value=package_counter).alignment = self.center_align
+                package_counter += 1
+
+                # Название пакета с отступом
+                package_name = f"  📦 {package.get('name', 'Безымянный пакет')}"
+                cell = ws.cell(row=current_row, column=2, value=package_name)
+                cell.alignment = self.left_align
+                cell.fill = package_fill
+                cell.font = package_font
+
+                # Единица измерения и количество
+                volume_data = package.get('volume_data', {})
+                calculations = package.get('calculations', {})
+
+                unit = (volume_data.get('unit') or
+                       calculations.get('unit') or 'шт')
+                quantity = (volume_data.get('quantity') or
+                           calculations.get('quantity') or 0)
+
+                ws.cell(row=current_row, column=3, value=unit).alignment = self.center_align
+                ws.cell(row=current_row, column=4, value=str(quantity)).alignment = self.center_align
+
+                # Даты начала и окончания
+                schedule_blocks = package.get('schedule_blocks', [])
+                if schedule_blocks:
+                    start_week = min(schedule_blocks)
+                    end_week = max(schedule_blocks)
+
+                    # Находим соответствующие даты
+                    start_date = ""
+                    end_date = ""
+                    for block in timeline_blocks:
+                        week_id = block.get('week_id', block.get('block_id'))
+                        if week_id == start_week:
+                            start_date = datetime.fromisoformat(block['start_date']).strftime('%d.%m.%y')
+                        if week_id == end_week:
+                            end_date = datetime.fromisoformat(block['end_date']).strftime('%d.%m.%y')
+
+                    ws.cell(row=current_row, column=5, value=start_date).alignment = self.center_align
+                    ws.cell(row=current_row, column=6, value=end_date).alignment = self.center_align
+
+                # Прогресс по неделям
+                progress_per_block = package.get('progress_per_block', {})
+                for i, block in enumerate(timeline_blocks, 7):
+                    week_id = str(block.get('week_id', block.get('block_id', i-6)))
+                    progress = progress_per_block.get(week_id, 0)
+
+                    cell = ws.cell(row=current_row, column=i)
+                    if progress > 0:
+                        cell.value = f"{progress}%"
+                        cell.alignment = self.center_align
+                        # Градиентная заливка в зависимости от прогресса
+                        if progress >= 40:
+                            cell.fill = self.progress_high
+                        elif progress >= 20:
+                            cell.fill = self.progress_medium
+                        else:
+                            cell.fill = self.progress_low
+                        cell.font = Font(color="FFFFFF", bold=True, size=9)
+                    cell.border = self.border
+
+                # Границы для всей строки
+                for col in range(1, 7 + timeline_cols):
+                    ws.cell(row=current_row, column=col).border = self.border
+
+                current_row += 1
+
+            # Пустая строка между категориями
+            current_row += 1
+
+        # Настройка ширины колонок
+        column_widths = {
+            'A': 8,   # № п/п
+            'B': 40,  # Наименование
+            'C': 10,  # Ед. изм.
+            'D': 12,  # Кол-во
+            'E': 12,  # Начало
+            'F': 12,  # Окончание
+        }
+
+        for col, width in column_widths.items():
+            ws.column_dimensions[col].width = width
+
+        # Недели (колонки G и далее)
+        for i in range(7, 7 + timeline_cols):
+            ws.column_dimensions[get_column_letter(i)].width = 8
+
+        logger.info(f"✅ Создан иерархический лист с {len(categories)} категориями и {package_counter-1} пакетами")
+
     def _create_schedule_sheet(self, ws, work_packages: List[Dict], timeline_blocks: List[Dict], project_info: Dict, scheduling_data: Dict = {}):
         """Создает лист с календарным графиком (Gantt)"""
         
@@ -410,10 +704,10 @@ class MultiPageScheduleGenerator:
             
             # Обоснования
             reasoning_items = [
-                ("🗓️ ПОЧЕМУ ИМЕННО ЭТИ НЕДЕЛИ:", reasoning.get('why_these_weeks', 'Не указано')),
-                ("⏳ ПОЧЕМУ ИМЕННО ТАКАЯ ПРОДОЛЖИТЕЛЬНОСТЬ:", reasoning.get('why_this_duration', 'Не указано')),
-                ("📊 ПОЧЕМУ ИМЕННО ТАКАЯ ПОСЛЕДОВАТЕЛЬНОСТЬ:", reasoning.get('why_this_sequence', 'Не указано')),
-                ("👷 ПОЧЕМУ ИМЕННО ТАКОЕ КОЛИЧЕСТВО ЛЮДЕЙ:", reasoning.get('why_this_staffing', 'Не указано'))
+                ("🗓️ ПОЧЕМУ ИМЕННО ЭТИ НЕДЕЛИ:", reasoning.get('why_weeks', 'Не указано')),
+                ("⏳ ПОЧЕМУ ИМЕННО ТАКАЯ ПРОДОЛЖИТЕЛЬНОСТЬ:", reasoning.get('why_duration', 'Не указано')),
+                ("📊 ПОЧЕМУ ИМЕННО ТАКАЯ ПОСЛЕДОВАТЕЛЬНОСТЬ:", reasoning.get('why_sequence', 'Не указано')),
+                ("👷 ПОЧЕМУ ИМЕННО ТАКОЕ КОЛИЧЕСТВО ЛЮДЕЙ:", reasoning.get('why_staffing', 'Не указано'))
             ]
             
             for j, (label, explanation) in enumerate(reasoning_items):
