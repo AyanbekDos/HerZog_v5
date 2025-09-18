@@ -25,34 +25,21 @@ class ClaudeClient:
 
         self.base_url = "https://openrouter.ai/api/v1/chat/completions"
 
-        # Флаг для тестового режима - ограничивает токены и логирует стоимость
-        test_mode_env = os.getenv('CLAUDE_TEST_MODE', 'true').lower().strip()
-        self.test_mode = test_mode_env in ('true', '1', 'yes', 'on')
+        # ВСЕГДА ПРОДАКШЕН РЕЖИМ - убран тестовый режим для предотвращения ошибок
+        self.test_mode = False
 
-        # Модели для разных агентов с учетом их задач
-        if self.test_mode:
-            # В тестовом режиме всё через дешёвый Claude 3.5 для экономии
-            default_model = 'anthropic/claude-3.5-sonnet-20241022'
-            self.agent_models = {
-                'work_packager': default_model,
-                'works_to_packages': default_model,
-                'counter': default_model,
-                'scheduler_and_staffer': default_model,
-                'classifier': default_model
-            }
-        else:
-            # В продакшене: простые агенты через Claude 3.5, сложные через Sonnet 4
-            sonnet_4 = 'anthropic/claude-sonnet-4'
-            claude_35 = 'anthropic/claude-3.5-sonnet-20241022'
+        # Оптимальное распределение моделей: простые агенты через Claude 3.5, сложные через Sonnet 4
+        sonnet_4 = 'anthropic/claude-sonnet-4'
+        claude_35 = 'anthropic/claude-3.5-sonnet-20241022'
 
-            self.agent_models = {
-                'work_packager': sonnet_4,        # Сложная группировка → Sonnet 4
-                'works_to_packages': claude_35,   # Простое присвоение → Claude 3.5
-                'counter': claude_35,             # Простые расчеты → Claude 3.5
-                'scheduler_and_staffer': sonnet_4, # Сложное планирование → Sonnet 4
-                'classifier': claude_35           # Простая классификация → Claude 3.5
-            }
-            default_model = sonnet_4  # По умолчанию Sonnet 4
+        self.agent_models = {
+            'work_packager': sonnet_4,        # Сложная группировка → Sonnet 4
+            'works_to_packages': claude_35,   # Простое присвоение → Claude 3.5
+            'counter': claude_35,             # Простые расчеты → Claude 3.5
+            'scheduler_and_staffer': sonnet_4, # Сложное планирование → Sonnet 4
+            'classifier': claude_35           # Простая классификация → Claude 3.5
+        }
+        default_model = sonnet_4  # По умолчанию Sonnet 4
 
         # Дефолтная модель для обратной совместимости
         self.model_name = default_model
@@ -85,17 +72,8 @@ class ClaudeClient:
         # Выбираем модель для агента
         model_name = self.get_model_for_agent(agent_name) if agent_name else self.model_name
 
-        # Ограничиваем токены в тестовом режиме для экономии
-        if self.test_mode:
-            if agent_name == 'work_packager':
-                max_tokens = 2000  # Сильно урезано для тестов
-            elif agent_name == 'counter':
-                max_tokens = 2000  # Урезано для тестов
-            else:
-                max_tokens = 1500
-        else:
-            # В продакшене используем разумные лимиты для больших данных
-            max_tokens = 8000  # Разумный лимит для выходных токенов
+        # Всегда используем продакшн лимиты токенов
+        max_tokens = 8000  # Разумный лимит для выходных токенов
 
         # Формируем сообщения для Claude API
         messages = []
@@ -137,9 +115,6 @@ class ClaudeClient:
         for attempt in range(max_retries):
             try:
                 logger.info(f"📡 Claude запрос {attempt + 1}/{max_retries}: {model_name} {f'({agent_name})' if agent_name else ''} (промт: {len(prompt)} символов, лимит токенов: {max_tokens})")
-
-                if self.test_mode:
-                    logger.info("🧪 ТЕСТОВЫЙ РЕЖИМ - ограниченные токены для экономии")
 
                 async with aiohttp.ClientSession() as session:
                     async with session.post(self.base_url, json=payload, headers=headers) as response:
